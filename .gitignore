@@ -1,0 +1,18 @@
+# 环境变量（含 API Key，绝不提交）
+backend/.env
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# 系统文件
+.DS_Store
+Thumbs.db
