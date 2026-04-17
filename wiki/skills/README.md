@@ -1,51 +1,62 @@
 # Skills 文档索引
 
-这组文档专门解释 VibeCoding 新一代 `skill-first` 设计，重点覆盖：
+这组文档讲的不是“某个 Prompt 怎么写”，而是一整套能力是怎么被拆出来、封装起来、再被前后端消费的。
 
-- 为什么要从“prompt 驱动”升级到“skill + schema + workflow 驱动”
-- `skills/` 目录如何组织、如何被解析、如何保持平台无关
-- 前端结构化表单如何映射到后端 schema
-- 为什么需要“澄清对话 -> 结构化回填 -> diff 预览 -> PRD 生成”的闭环
-- 回填中最容易出现的 JSON 问题，以及当前怎么兜底
-- 这套设计如何兼容多个模型、多个 Agent 运行时
-- 当前与 Claude / Claude Code 协作时的实际工作方式
+如果只看现在的产品表面，`/v2` 好像只是多了一个结构化表单、多了一个回填 diff、多了几步文档生成。但把这些东西串起来看，你会发现它背后其实已经不是传统的“页面调模型”了，而是在往一套真正可迁移的 `skill-first` 架构走。
 
-## 阅读顺序
+这也是这一组文档存在的意义。
 
-| 文档 | 内容 |
+它们主要解释几件事：
+
+- 为什么我们不再满足于“写一段 Prompt 让模型生成 PRD”
+- 为什么要把 PRD 生成抽成 skill，而不是继续塞在页面逻辑里
+- 为什么前端要先做结构化录入，而不是让模型自由理解输入
+- 为什么要有“澄清 -> 回填 -> diff -> 确认”这一整段中间流程
+- 这套 skill 设计为什么会参考 OpenClaw，但又不强绑定任何一个 Agent 平台
+- 它今天怎么和 Claude 协作，未来又怎么兼容更多模型
+
+## 推荐阅读顺序
+
+如果你第一次接触这套设计，建议按下面的顺序看：
+
+| 文档 | 适合什么时候看 |
+|------|----------------|
+| [00-overview.md](./00-overview.md) | 先建立全局印象：这套 Skills 架构到底解决了什么问题 |
+| [01-design-philosophy.md](./01-design-philosophy.md) | 想知道为什么整个设计要从 Prompt 思维切到 skill-first |
+| [02-skill-package-structure.md](./02-skill-package-structure.md) | 想理解 skill 包本身长什么样、为什么这么拆 |
+| [03-skill-runtime-contracts.md](./03-skill-runtime-contracts.md) | 想理解输入、输出、约束、工作流这些“契约”怎么发挥作用 |
+| [04-directory-and-file-resolution.md](./04-directory-and-file-resolution.md) | 想知道系统到底是怎么找到这些 skill 文件并读进去的 |
+| [05-frontend-schema-mapping.md](./05-frontend-schema-mapping.md) | 想看前端表单怎么稳定映射到后端 schema |
+| [06-v2-workbench-flow.md](./06-v2-workbench-flow.md) | 想理解 `/v2` 为什么更像工作台，而不是普通向导 |
+| [07-clarification-loop.md](./07-clarification-loop.md) | 想理解为什么澄清不能省，而且为什么它必须先于 PRD |
+| [08-prd-generation-pipeline.md](./08-prd-generation-pipeline.md) | 想看结构化摘要、对话、模板、规则是怎么拼成最终 PRD 的 |
+| [09-backfill-diff-and-approval.md](./09-backfill-diff-and-approval.md) | 想看回填、diff、确认这套机制为什么是整条链路的关键 |
+| [10-json-failure-modes.md](./10-json-failure-modes.md) | 想看最真实的坑：为什么“让模型吐 JSON”总是容易出问题 |
+| [11-model-independence.md](./11-model-independence.md) | 想知道这套东西为什么能不绑某个模型 |
+| [12-openclaw-inspiration.md](./12-openclaw-inspiration.md) | 想看 OpenClaw 风格到底给了这套设计什么启发 |
+| [13-claude-collaboration.md](./13-claude-collaboration.md) | 想看今天这套系统和 Claude / Claude Code 是怎么协作的 |
+| [14-roadmap-and-guidelines.md](./14-roadmap-and-guidelines.md) | 想看未来怎么把这套东西继续做大、做稳、做通用 |
+
+## 这组文档最适合谁
+
+它不是写给“只想知道怎么点按钮”的用户的。它更适合下面几类人：
+
+- 想把 PRD、接口设计、提示词这些能力真正做成独立 skill 的人
+- 想把 VibeCoding 接到不止一个模型、一个 Agent 运行时的人
+- 想理解 `/v2` 为什么看起来比旧版复杂，但其实更可靠的人
+- 想把“AI 生成文档”这件事做成工程系统，而不是 Prompt 技巧的人
+
+## 当前代码入口
+
+如果你准备边看文档边对照代码，下面这些入口最关键：
+
+| 文件 | 作用 |
 |------|------|
-| [00-overview.md](./00-overview.md) | 总览：这套 Skills 架构到底解决了什么问题 |
-| [01-design-philosophy.md](./01-design-philosophy.md) | 设计理念：为什么强调 skill-first、schema-first、workflow-first |
-| [02-skill-package-structure.md](./02-skill-package-structure.md) | 技能包结构：`skill.yaml`、`instructions.md`、`references/` 各自负责什么 |
-| [03-skill-runtime-contracts.md](./03-skill-runtime-contracts.md) | 运行时契约：输入/输出/约束/工作流如何定义和消费 |
-| [04-directory-and-file-resolution.md](./04-directory-and-file-resolution.md) | 目录解析与文件解析：系统怎么找到 skill、模板、schema 和示例 |
-| [05-frontend-schema-mapping.md](./05-frontend-schema-mapping.md) | 前端结构化录入：表单如何稳定映射到 schema |
-| [06-v2-workbench-flow.md](./06-v2-workbench-flow.md) | `/v2` 工作台：完整链路、跳步能力、阶段导航、会话恢复 |
-| [07-clarification-loop.md](./07-clarification-loop.md) | 澄清对话：为什么不能一开始就生成 PRD，以及怎么限制 AI 只做澄清 |
-| [08-prd-generation-pipeline.md](./08-prd-generation-pipeline.md) | PRD 生成流水线：结构化摘要、对话补充、模板约束如何组合 |
-| [09-backfill-diff-and-approval.md](./09-backfill-diff-and-approval.md) | 回填机制：从对话回写 schema、diff 预览、确认后生成 |
-| [10-json-failure-modes.md](./10-json-failure-modes.md) | JSON 故障手册：最常见的问题、修复策略、接口错误设计 |
-| [11-model-independence.md](./11-model-independence.md) | 模型独立性：怎么兼容 Claude、OpenAI 以及未来其他模型 |
-| [12-openclaw-inspiration.md](./12-openclaw-inspiration.md) | OpenClaw 启发：这套设计如何借鉴“通用 skill”思路 |
-| [13-claude-collaboration.md](./13-claude-collaboration.md) | 当前与 Claude 协作：现状、边界、为什么这套文档仍然需要平台无关 |
-| [14-roadmap-and-guidelines.md](./14-roadmap-and-guidelines.md) | 演进路线：接下来怎么把这套系统做得更稳、更强、更通用 |
-
-## 适合谁看
-
-- 想理解这套 `skills` 方案设计全貌的人
-- 准备继续做 skill 运行时或 skill 市场的人
-- 要把 VibeCoding 接到不同模型或不同 Agent 平台的人
-- 想把“PRD -> API -> Prompts”这一套做成独立能力包的人
-
-## 当前代码对应位置
-
-| 目录/文件 | 作用 |
-|-----------|------|
-| [`skills/prd-generator/skill.yaml`](../../skills/prd-generator/skill.yaml) | 技能包元信息与契约 |
-| [`skills/prd-generator/instructions.md`](../../skills/prd-generator/instructions.md) | 技能执行说明 |
+| [`skills/prd-generator/skill.yaml`](../../skills/prd-generator/skill.yaml) | skill 的能力契约 |
+| [`skills/prd-generator/instructions.md`](../../skills/prd-generator/instructions.md) | skill 的执行说明 |
 | [`skills/prd-generator/references/field-schema.json`](../../skills/prd-generator/references/field-schema.json) | 输入 schema |
-| [`backend/services/document_service.py`](../../backend/services/document_service.py) | 技能参考文件加载、PRD 生成、回填同步 |
+| [`backend/services/document_service.py`](../../backend/services/document_service.py) | skill 文件读取、PRD 生成、回填同步 |
 | [`backend/services/conversation_service.py`](../../backend/services/conversation_service.py) | 对话编排 |
-| [`backend/services/prompts.py`](../../backend/services/prompts.py) | 对话与澄清 Prompt |
-| [`frontend/src/AppV2.tsx`](../../frontend/src/AppV2.tsx) | `/v2` 工作台、结构化录入、回填 diff、阶段导航 |
-| [`frontend/src/services/api.ts`](../../frontend/src/services/api.ts) | 前端 API 编排 |
+| [`backend/services/prompts.py`](../../backend/services/prompts.py) | 通用对话 Prompt 与澄清专用 Prompt |
+| [`frontend/src/AppV2.tsx`](../../frontend/src/AppV2.tsx) | `/v2` 工作台本体 |
+| [`frontend/src/services/api.ts`](../../frontend/src/services/api.ts) | 前端对 skill 相关接口的调用封装 |

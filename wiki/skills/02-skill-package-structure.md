@@ -1,8 +1,15 @@
-# Skill 包结构
+# Skill 包结构：为什么要拆成 `skill.yaml`、`instructions.md` 和 `references/`
 
-## 1. 当前目录
+第一次看到 `skills/prd-generator/` 这个目录时，很多人会有一个很直接的疑问：
 
-当前 `prd-generator` 的目录如下：
+为什么不就写一个 Prompt 文件完事？  
+为什么还要拆出 `skill.yaml`、`instructions.md`、`references/` 这么多层？
+
+这个问题问得很好，因为这恰好能看出 skill 设计和普通 Prompt 封装的分界线。
+
+## 先看当前结构
+
+现在的 `prd-generator` 长这样：
 
 ```text
 skills/prd-generator/
@@ -17,104 +24,110 @@ skills/prd-generator/
         └── friend-circle-copywriter.output.md
 ```
 
-## 2. `skill.yaml`
+表面上看这只是文件组织问题，实际上每一层都在回答不同的问题。
 
-位置：
+## `skill.yaml`：回答“这是什么能力”
 
-[`skills/prd-generator/skill.yaml`](../../skills/prd-generator/skill.yaml)
+`skill.yaml` 最像能力说明书的封面页。
 
-它定义的是**能力契约**，不是具体实现代码。
+它不负责教模型怎么一步一步思考，也不负责存放模板细节。它的作用更像是把这项能力的边界先钉死。
 
-### 2.1 它负责什么
+比如在这里，你能看到：
 
-- skill 名称
-- skill 描述
-- 输入格式与 schema
-- 输出格式与模板
-- 默认约束
-- 工作流步骤
-- 质量检查项
+- 这个 skill 叫什么
+- 它接受什么输入
+- 输出什么格式
+- 默认约束是什么
+- 工作流大概有哪些步骤
 
-### 2.2 为什么它重要
+为什么它必须单独存在？因为这些信息不只是给模型看的，也是给运行时看的。
 
-因为运行时不应该靠猜：
+如果没有它，系统就只能靠某段 Prompt 自己“顺便”说明：
 
-- 这个 skill 要什么输入？
-- 输出什么？
-- 缺失值怎么表示？
-- 执行时最重要的约束是什么？
+- 输入大概长什么样
+- 输出大概长什么样
+- 哪些规则比较重要
 
-这些都应该能从一个机器可读文件里拿到。
+这样做短期没问题，长期一定会乱。
 
-## 3. `instructions.md`
+## `instructions.md`：回答“这项能力应该怎么执行”
 
-位置：
+`instructions.md` 更像真正写给模型看的操作说明书。
 
-[`skills/prd-generator/instructions.md`](../../skills/prd-generator/instructions.md)
+它和 `skill.yaml` 的关系，有点像这样：
 
-它定义的是**执行说明**。
+- `skill.yaml` 负责定义契约
+- `instructions.md` 负责定义过程
 
-### 3.1 它负责什么
+在这里面，最重要的不是“多详细”，而是“多清楚”。
 
-- 输入契约的解释
-- 输出契约的解释
-- 按章节的生成规则
-- 去重规则
-- 写作风格约束
-- 最终检查清单
+比如：
 
-### 3.2 为什么不直接全塞进 `skill.yaml`
+- 先校验输入
+- 再规整需求
+- MVP 功能要优先落成表格
+- 技术规格里要区分确定项和建议项
+- 缺失信息统一写 `待确认`
 
-因为：
+这些东西如果都塞进 `skill.yaml`，会显得过于结构化、读起来僵；  
+如果全塞进一个巨大 Prompt，又会和运行时约束混在一起。
 
-- `skill.yaml` 更适合结构化元信息
-- `instructions.md` 更适合人和模型共同阅读
+所以拆出来反而更自然。
 
-两者分离后，skill 的结构和执行逻辑都会更清楚。
+## `references/`：回答“执行这项能力需要参考什么”
 
-## 4. `references/`
+这部分是很多 skill 设计里最容易被忽略，但其实最值钱的一层。
 
-`references/` 是 skill 的知识附件。
+因为一项能力真正稳定下来之后，最宝贵的往往不只是 Prompt 本身，而是：
 
-### 4.1 `field-schema.json`
+- 输入 schema
+- 输出模板
+- 写作规则
+- 真实示例
 
-定义输入结构与字段形态，是前后端都依赖的核心文件。
+这些东西如果继续埋在 Prompt 里，维护成本会很高。
 
-### 4.2 `prd-template.md`
+而一旦单独放进 `references/`：
 
-定义输出 PRD 的标准章节结构，是生成结果的“骨架”。
+- 前端可以直接对齐 schema
+- 后端可以直接读取模板
+- 例子可以被复用做测试
+- 运行时也更容易做动态装载
 
-### 4.3 `writing-rules.md`
+这时 skill 就开始像一个真正的“能力包”，而不是“提示词文本”。
 
-定义文风和写作边界，例如：
+## 为什么 `examples/` 也很重要
 
-- 少空话
-- 少重复
-- MVP 用表格
-- 不要编造业务事实
+很多系统只会写规则，不会写例子。  
+这其实会让能力长期处于一种“大家大概知道想要什么，但没人说得特别准”的状态。
 
-### 4.4 `examples/`
+示例的价值在于，它把抽象要求落到了真实输入输出上。
 
-提供一组真实输入输出，用来：
+比如看到：
 
-- 帮助理解 skill 期待的输入长什么样
-- 验证 skill 的输出是不是在预期区间内
-- 为未来自动评估做样例基础
+- `friend-circle-copywriter.input.json`
+- `friend-circle-copywriter.output.md`
 
-## 5. 为什么这套结构是可迁移的
+你马上就能知道：
 
-因为没有任何一个核心文件天然绑定到某个 SDK：
+- 输入应该收敛到什么粒度
+- 输出应该控制在什么风格
+- 这套 skill 生成出来的东西到底算不算合格
 
-- `skill.yaml` 是通用配置
-- `instructions.md` 是普通 Markdown
-- `field-schema.json` 是标准 JSON Schema
-- `prd-template.md` 是普通 Markdown 模板
+这比单纯写一堆原则有效得多。
 
-只要一个运行时具备：
+## 这种拆法的真正意义
 
-1. 读取文件
-2. 组装 Prompt
-3. 调模型
-4. 返回结果
+如果把 skill 包理解成一个独立产品，那么这几层大概对应的是：
 
-它就可以消费这套 skill。
+- `skill.yaml`：产品简介与接口说明
+- `instructions.md`：操作手册
+- `references/`：附件、模板、样例、规范
+
+这也是为什么它比“单个 Prompt 文件”更接近 OpenClaw 那种通用 skill 的味道。
+
+因为它不是把所有东西都压成一句“请你做 X”，而是开始认真回答：
+
+> 这项能力到底由哪些信息构成？
+
+一旦这个问题被回答清楚，skill 才真正具备独立性。
