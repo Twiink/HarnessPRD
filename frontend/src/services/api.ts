@@ -64,9 +64,14 @@ export const conversationApi = {
   async startConversationStream(
     initialInput: string,
     formData: Record<string, string>,
+    systemPromptOverride: string | undefined,
     onChunk: (text: string) => void
   ): Promise<{ conversation_id: string; messages: Message[] }> {
-    return readStream('/api/conversation/start-stream', { initial_input: initialInput, form_data: formData }, onChunk);
+    return readStream(
+      '/api/conversation/start-stream',
+      { initial_input: initialInput, form_data: formData, system_prompt_override: systemPromptOverride },
+      onChunk
+    );
   },
 
   /** 继续对话 — 流式 */
@@ -96,6 +101,29 @@ export const conversationApi = {
     onChunk: (text: string) => void
   ): Promise<void> {
     await readStream('/api/conversation/generate-prd-stream', { conversation_messages: conversationMessages }, onChunk);
+  },
+
+  async generatePrdFromSummaryStream(
+    requirementsSummary: Record<string, unknown>,
+    conversationMessages: Message[],
+    onChunk: (text: string) => void
+  ): Promise<void> {
+    await readStream(
+      '/api/conversation/generate-prd-from-summary-stream',
+      { requirements_summary: requirementsSummary, conversation_messages: conversationMessages },
+      onChunk
+    );
+  },
+
+  async syncSummaryFromConversation(
+    requirementsSummary: Record<string, unknown>,
+    conversationMessages: Message[]
+  ): Promise<{ requirements_summary: Record<string, unknown>; status: string }> {
+    const res = await apiClient.post('/conversation/sync-summary-from-conversation', {
+      requirements_summary: requirementsSummary,
+      conversation_messages: conversationMessages,
+    });
+    return res.data;
   },
 
   /** 生成接口文档 — 流式 */

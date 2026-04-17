@@ -16,6 +16,8 @@
 | [09-configuration.md](./09-configuration.md) | 配置说明：环境变量、模型选择、自定义表单/模板 |
 | [10-deployment.md](./10-deployment.md) | 部署与运维：本地开发、Nginx、Docker、进程管理 |
 | [11-developer-guide.md](./11-developer-guide.md) | 开发者指南：常见任务、代码规范、扩展方向、FAQ |
+| [skills/README.md](./skills/README.md) | Skills 专题：skill 包设计、schema、回填、模型兼容、工作台流程 |
+| [v2record/README.md](./v2record/README.md) | `/v2` 开发记录：开发过程、踩坑、问题定位与复盘 |
 
 ## 快速导航
 
@@ -24,6 +26,12 @@
 
 ### 我想理解整体架构
 → [01-architecture.md](./01-architecture.md)
+
+### 我想理解新的 Skills 体系
+→ [skills/README.md](./skills/README.md)
+
+### 我想看 `/v2` 是怎么一步步做出来的
+→ [v2record/README.md](./v2record/README.md)
 
 ### 我想快速启动项目
 → [10-deployment.md](./10-deployment.md#本地开发一键启动)
