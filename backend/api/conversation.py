@@ -2,7 +2,7 @@
 
 import json
 import os
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any
 
@@ -10,6 +10,8 @@ from api.schemas import (
     StartConversationRequest,
     ContinueConversationRequest,
     ConversationMessagesRequest,
+    GeneratePrdFromSummaryRequest,
+    SyncSummaryFromConversationRequest,
     GenerateApiDocsRequest,
     GeneratePromptsRequest,
     OptimizeDocumentRequest,
@@ -56,7 +58,7 @@ async def start_conversation_stream(request: StartConversationRequest):
     async def generate():
         try:
             async for event in conversation_service.start_conversation_stream(
-                request.initial_input, request.form_data
+                request.initial_input, request.form_data, request.system_prompt_override
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as e:
@@ -91,6 +93,30 @@ async def generate_prd_stream(request: ConversationMessagesRequest):
         document_service.generate_prd_stream(request.conversation_messages)
     )
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.post("/generate-prd-from-summary-stream")
+async def generate_prd_from_summary_stream(request: GeneratePrdFromSummaryRequest):
+    """基于结构化需求摘要生成 PRD — 流式返回"""
+    gen = _make_sse_generator(
+        document_service.generate_prd_from_summary_stream(
+            request.requirements_summary,
+            request.conversation_messages or [],
+        )
+    )
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.post("/sync-summary-from-conversation")
+async def sync_summary_from_conversation(request: SyncSummaryFromConversationRequest):
+    """基于澄清对话更新结构化需求摘要"""
+    try:
+        return await document_service.sync_summary_from_conversation(
+            request.requirements_summary,
+            request.conversation_messages,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 @router.post("/generate-api-docs-stream")

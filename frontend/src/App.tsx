@@ -162,7 +162,7 @@ function App() {
 
     let accumulated = '';
     try {
-      const result = await conversationApi.startConversationStream('', formData, (chunk) => {
+      const result = await conversationApi.startConversationStream('', formData, undefined, (chunk) => {
         accumulated += chunk;
         setStreamingContent(accumulated);
       });

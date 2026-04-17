@@ -61,8 +61,9 @@ class ConversationService:
         self,
         user_initial_input: str,
         form_data: Optional[Dict[str, Any]],
+        system_prompt_override: Optional[str] = None,
     ):
-        messages = [SystemMessage(content=self.system_prompt)]
+        messages = [SystemMessage(content=system_prompt_override or self.system_prompt)]
 
         if form_data and any(v for v in form_data.values() if v):
             form_summary = format_form_data(form_data)
@@ -82,9 +83,14 @@ class ConversationService:
         self,
         user_initial_input: str = "",
         form_data: Optional[Dict[str, Any]] = None,
+        system_prompt_override: Optional[str] = None,
     ) -> AsyncGenerator[Dict, None]:
         llm = get_llm()
-        lc_messages = self._build_initial_messages(user_initial_input, form_data)
+        lc_messages = self._build_initial_messages(
+            user_initial_input,
+            form_data,
+            system_prompt_override,
+        )
 
         full_content = ""
         async for chunk in llm.astream(lc_messages):
