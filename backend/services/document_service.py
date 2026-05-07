@@ -2,6 +2,7 @@
 
 import os
 import json
+import re
 from typing import List, Dict, Any, AsyncGenerator
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -12,8 +13,13 @@ from services.prompts import (
     API_DOCS_GENERATION_PROMPT,
     PROMPTS_GENERATION_PROMPT,
     OPTIMIZE_DOCUMENT_PROMPT_TEMPLATE,
+    PRD_REWRITE_PROMPT_TEMPLATE,
+    PRD_WRITER_SYSTEM_PROMPT,
 )
+from services.prd_review_agent import PrdReviewAgent
+from services.prd_writer_agent import PrdWriterAgent
 from services.conversation_service import _build_lc_messages
+from services.rag_service import retrieve_api_docs_context, retrieve_api_docs_hits
 
 
 def _load_prd_template() -> str:
@@ -135,30 +141,32 @@ def _build_summary_sync_prompt(
 def _extract_json_object(raw_text: str) -> Dict[str, Any]:
     """尽量从模型输出中提取 JSON 对象"""
     text = raw_text.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-        if text.startswith("json"):
-            text = text[4:].strip()
+    fenced_blocks = re.findall(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced_blocks:
+        candidates = [block.strip() for block in fenced_blocks if block.strip()]
+    else:
+        candidates = [text]
 
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
+    decoder = json.JSONDecoder()
 
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        candidate = text[start:end + 1]
-        parsed = json.loads(candidate)
-        if isinstance(parsed, dict):
-            return parsed
+    for candidate_text in candidates:
+        try:
+            parsed = json.loads(candidate_text)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        for match in re.finditer(r"\{", candidate_text):
+            try:
+                parsed, end_index = decoder.raw_decode(candidate_text[match.start():])
+                if isinstance(parsed, dict):
+                    tail = candidate_text[match.start() + end_index:].strip()
+                    if not tail or tail.startswith(("```", "#", "//")):
+                        return parsed
+                    return parsed
+            except json.JSONDecodeError:
+                continue
 
     raise ValueError("模型未返回合法 JSON 对象")
 
@@ -183,7 +191,35 @@ def _build_json_repair_prompt(raw_text: str) -> str:
     ])
 
 
+def _build_summary_regeneration_prompt(
+    requirements_summary: Dict[str, Any],
+    conversation_messages: List[Dict[str, str]],
+) -> str:
+    summary_json = json.dumps(requirements_summary, ensure_ascii=False, indent=2)
+    conversation_text = _format_conversation_context(conversation_messages)
+    return "\n".join([
+        "请重新输出一份更新后的结构化需求摘要 JSON。",
+        "这是一次失败后的重试，请务必严格遵守格式。",
+        "要求：",
+        "1. 只输出一个合法 JSON 对象。",
+        "2. 不要输出 Markdown，不要输出解释，不要输出代码块。",
+        "3. 保持原字段结构；不要新增无关字段。",
+        "4. 仅根据澄清对话中的明确内容更新字段。",
+        "5. 无法确定的值保留原值。",
+        "",
+        "当前结构化需求摘要：",
+        summary_json,
+        "",
+        "澄清对话：",
+        conversation_text or "（无）",
+    ])
+
+
 class DocumentService:
+    def __init__(self):
+        self.prd_writer = PrdWriterAgent()
+        self.prd_reviewer = PrdReviewAgent()
+
     async def generate_prd(self, conversation_messages: List[Dict[str, str]]) -> Dict[str, Any]:
         llm = get_llm(temperature=0.3)
         lc_messages = _build_lc_messages(conversation_messages)
@@ -195,21 +231,61 @@ class DocumentService:
         self,
         conversation_messages: List[Dict[str, str]],
     ) -> AsyncGenerator[Dict, None]:
-        llm = get_llm(temperature=0.3)
-        lc_messages = _build_lc_messages(conversation_messages)
-        lc_messages.append(HumanMessage(content=_build_prd_prompt()))
+        draft_v1 = ""
+        yield {"type": "phase", "phase": "writer_started"}
 
-        async for chunk in llm.astream(lc_messages):
-            if chunk.content:
-                yield {"type": "chunk", "content": chunk.content}
+        async for event in self.prd_writer.write_stream(conversation_messages):
+            if event["type"] == "text_delta":
+                draft_v1 += event["content"]
+            yield event
 
-        yield {"type": "done"}
+        yield {"type": "phase", "phase": "review_started"}
+        review_result = await self.prd_reviewer.review(conversation_messages, draft_v1)
+        yield {"type": "review", "phase": "review", "content": review_result}
+
+        if review_result.get("passed", False):
+            yield {
+                "type": "done",
+                "final_prd": draft_v1,
+                "review": review_result,
+                "revision_applied": False,
+            }
+            return
+
+        yield {"type": "phase", "phase": "rewrite_started"}
+        draft_v2 = ""
+        async for event in self.prd_writer.rewrite_stream(
+            conversation_messages=conversation_messages,
+            current_draft=draft_v1,
+            review_result=review_result,
+        ):
+            if event["type"] == "text_delta":
+                draft_v2 += event["content"]
+            yield event
+
+        yield {
+            "type": "done",
+            "final_prd": draft_v2,
+            "review": review_result,
+            "revision_applied": True,
+        }
 
     async def generate_prd_from_summary_stream(
         self,
         requirements_summary: Dict[str, Any],
         conversation_messages: List[Dict[str, str]] | None = None,
     ) -> AsyncGenerator[Dict, None]:
+        clarification_context = ""
+        review_context_parts = [
+            "结构化需求摘要：",
+            json.dumps(requirements_summary, ensure_ascii=False, indent=2),
+        ]
+        if conversation_messages:
+            clarification_context = _format_conversation_context(conversation_messages)
+            if clarification_context:
+                review_context_parts.extend(["", "补充澄清对话：", clarification_context])
+
+        yield {"type": "phase", "phase": "writer_started"}
         llm = get_llm(temperature=0.2)
         lc_messages = [
             SystemMessage(
@@ -221,25 +297,73 @@ class DocumentService:
             )
         ]
 
-        if conversation_messages:
-            clarification_context = _format_conversation_context(conversation_messages)
-            if clarification_context:
-                lc_messages.append(
-                    HumanMessage(
-                        content=(
-                            "以下是围绕该需求的澄清对话，请将其中明确的信息视为对结构化需求摘要的补充或修正：\n\n"
-                            f"{clarification_context}"
-                        )
+        if clarification_context:
+            lc_messages.append(
+                HumanMessage(
+                    content=(
+                        "以下是围绕该需求的澄清对话，请将其中明确的信息视为对结构化需求摘要的补充或修正：\n\n"
+                        f"{clarification_context}"
                     )
                 )
+            )
 
         lc_messages.append(HumanMessage(content=_build_prd_from_summary_prompt(requirements_summary)))
 
+        draft_v1 = ""
         async for chunk in llm.astream(lc_messages):
             if chunk.content:
-                yield {"type": "chunk", "content": chunk.content}
+                draft_v1 += chunk.content
+                yield {"type": "text_delta", "phase": "writer", "content": chunk.content}
 
-        yield {"type": "done"}
+        yield {"type": "phase", "phase": "review_started"}
+        review_result = await self.prd_reviewer.review(
+            conversation_messages or [],
+            draft_v1,
+            review_context="\n".join(review_context_parts),
+        )
+        yield {"type": "review", "phase": "review", "content": review_result}
+
+        if review_result.get("passed", False):
+            yield {
+                "type": "done",
+                "final_prd": draft_v1,
+                "review": review_result,
+                "revision_applied": False,
+            }
+            return
+
+        yield {"type": "phase", "phase": "rewrite_started"}
+        rewrite_prompt = PRD_REWRITE_PROMPT_TEMPLATE.format(
+            current_draft=draft_v1,
+            review_result=review_result,
+        )
+        rewrite_messages = [
+            SystemMessage(content=PRD_WRITER_SYSTEM_PROMPT),
+        ]
+        if clarification_context:
+            rewrite_messages.append(
+                HumanMessage(
+                    content=(
+                        "以下是围绕该需求的澄清对话，请将其中明确的信息视为对结构化需求摘要的补充或修正：\n\n"
+                        f"{clarification_context}"
+                    )
+                )
+            )
+        rewrite_messages.append(HumanMessage(content=_build_prd_from_summary_prompt(requirements_summary)))
+        rewrite_messages.append(HumanMessage(content=rewrite_prompt))
+
+        draft_v2 = ""
+        async for chunk in llm.astream(rewrite_messages):
+            if chunk.content:
+                draft_v2 += chunk.content
+                yield {"type": "text_delta", "phase": "rewrite", "content": chunk.content}
+
+        yield {
+            "type": "done",
+            "final_prd": draft_v2,
+            "review": review_result,
+            "revision_applied": True,
+        }
 
     async def sync_summary_from_conversation(
         self,
@@ -271,13 +395,54 @@ class DocumentService:
             repaired_content = str(repair_response.content).strip()
             try:
                 updated_summary = _extract_json_object(repaired_content)
-            except Exception as repair_error:
-                raise ValueError(
-                    "结构化摘要回填失败：模型未返回可解析的 JSON。"
-                    f"\n原始输出片段：\n{_truncate_text(content)}"
-                    f"\n修复后输出片段：\n{_truncate_text(repaired_content)}"
-                ) from repair_error
+            except Exception:
+                regenerate_messages = [
+                    SystemMessage(
+                        content=(
+                            "你是一位严谨的需求分析师。"
+                            "你的任务是根据澄清对话更新结构化需求摘要，并且只返回合法 JSON 对象。"
+                        )
+                    ),
+                    HumanMessage(
+                        content=_build_summary_regeneration_prompt(
+                            requirements_summary,
+                            conversation_messages,
+                        )
+                    ),
+                ]
+                regenerate_response = await llm.ainvoke(regenerate_messages)
+                regenerated_content = str(regenerate_response.content).strip()
+                try:
+                    updated_summary = _extract_json_object(regenerated_content)
+                except Exception as regenerate_error:
+                    raise ValueError(
+                        "结构化摘要回填失败：模型未返回可解析的 JSON。"
+                        f"\n原始输出片段：\n{_truncate_text(content)}"
+                        f"\n修复后输出片段：\n{_truncate_text(repaired_content)}"
+                        f"\n重试后输出片段：\n{_truncate_text(regenerated_content)}"
+                    ) from regenerate_error
         return {"requirements_summary": updated_summary, "status": "completed"}
+
+    async def retrieve_api_docs_rag_hits(
+        self,
+        prd_content: str,
+        conversation_messages: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        query = f"{prd_content}\n\n{_format_conversation_context(conversation_messages)}"
+        hits = retrieve_api_docs_hits(query)
+        return {
+            "status": "completed",
+            "hits": [
+                {
+                    "source": hit.source,
+                    "title": hit.title,
+                    "score": hit.score,
+                    "content": hit.content,
+                    "content_preview": hit.content_preview,
+                }
+                for hit in hits
+            ],
+        }
 
     async def generate_api_docs_stream(
         self,
@@ -286,8 +451,24 @@ class DocumentService:
     ) -> AsyncGenerator[Dict, None]:
         llm = get_llm(temperature=0.3)
         lc_messages = _build_lc_messages(conversation_messages)
+        rag_context = retrieve_api_docs_context(
+            f"{prd_content}\n\n{_format_conversation_context(conversation_messages)}"
+        )
+        rag_section = (
+            f"\n\n接口文档生成前检索到的 RAG 参考资料：\n\n{rag_context}\n\n"
+            if rag_context
+            else "\n\n未检索到可用的 RAG 参考资料，请仅基于 PRD 和通用接口设计经验生成。\n\n"
+        )
         lc_messages.append(HumanMessage(
-            content=f"以下是已确认的产品需求文档（PRD）：\n\n{prd_content}\n\n{API_DOCS_GENERATION_PROMPT}"
+            content=(
+                f"以下是已确认的产品需求文档（PRD）：\n\n{prd_content}"
+                f"{rag_section}"
+                f"{API_DOCS_GENERATION_PROMPT}"
+                "\n\n额外要求："
+                "\n1. 优先遵循 RAG 中的团队接口规范。"
+                "\n2. 参考历史接口文档示例的路径命名、参数表、响应结构和错误码写法。"
+                "\n3. 如果引用了 RAG 中的规范，请把它内化为接口设计结果，不要在正文中机械堆砌原文。"
+            )
         ))
 
         async for chunk in llm.astream(lc_messages):

@@ -5,7 +5,14 @@ import ChatInput from './components/ChatInput';
 import FormStep from './components/FormStep';
 import DocumentReview from './components/DocumentReview';
 import { conversationApi } from './services/api';
-import type { Message, QuestionsConfig, ViewState, DocType } from './types';
+import type {
+  Message,
+  QuestionsConfig,
+  ViewState,
+  DocType,
+  PrdGenerationStage,
+  PrdReviewResult,
+} from './types';
 
 // ── 进度步骤 ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +49,13 @@ type SessionData = {
   apiDocsContent?: string;
   promptsContent?: string;
 };
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return `${fallback}：${error.message}`;
+  }
+  return fallback;
+}
 
 function saveSession(data: Partial<SessionData>) {
   try {
@@ -103,6 +117,8 @@ function App() {
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);   // 聊天流式
   const [isGenerating, setIsGenerating] = useState(false); // 文档优化流式
+  const [prdGenerationStage, setPrdGenerationStage] = useState<PrdGenerationStage>('idle');
+  const [prdReviewResult, setPrdReviewResult] = useState<PrdReviewResult | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -143,6 +159,12 @@ function App() {
   const canGeneratePrd = userMessageCount >= 2;
 
   const productName = formData['product_name'] || '产品';
+  const prdGenerationStatusText = useMemo(() => {
+    if (prdGenerationStage === 'writing') return 'Writer Agent 正在起草...';
+    if (prdGenerationStage === 'reviewing') return 'Review Agent 正在审查...';
+    if (prdGenerationStage === 'rewriting') return 'Writer Agent 正在修订...';
+    return '生成中...';
+  }, [prdGenerationStage]);
 
   // ── 表单 ───────────────────────────────────────────────────────────────────
 
@@ -171,7 +193,7 @@ function App() {
       saveSession({ messages: result.messages, conversationId: result.conversation_id, viewState: 'chatting', formData });
     } catch (err) {
       console.error(err);
-      alert('启动对话失败，请检查后端配置');
+      alert(getErrorMessage(err, '启动对话失败，请检查后端配置'));
       setViewState('form');
     } finally {
       setStreamingContent('');
@@ -199,7 +221,7 @@ function App() {
       saveSession({ messages: result.messages });
     } catch (err) {
       console.error(err);
-      alert('发送消息失败');
+      alert(getErrorMessage(err, '发送消息失败'));
       setMessages(messages);
     } finally {
       setStreamingContent('');
@@ -211,21 +233,47 @@ function App() {
 
   const handleGeneratePRD = async () => {
     setPrdContent('');
+    setPrdReviewResult(null);
     setViewState('generating-prd');
     setStreamingContent('');
+    setPrdGenerationStage('writing');
 
     let accumulated = '';
     try {
-      await conversationApi.generatePrdStream(messages, (chunk) => {
-        accumulated += chunk;
-        setStreamingContent(accumulated);
-      });
-      setPrdContent(accumulated);
-      saveSession({ prdContent: accumulated, viewState: 'review-prd' });
+      const result = await conversationApi.generatePrdStream(
+        messages,
+        (chunk) => {
+          accumulated += chunk;
+          setStreamingContent(accumulated);
+        },
+        {
+          onPhase: (phase) => {
+            if (phase === 'writer_started') {
+              accumulated = '';
+              setPrdGenerationStage('writing');
+              setStreamingContent('');
+            } else if (phase === 'review_started') {
+              setPrdGenerationStage('reviewing');
+            } else if (phase === 'rewrite_started') {
+              accumulated = '';
+              setPrdGenerationStage('rewriting');
+              setStreamingContent('');
+            }
+          },
+          onReview: (review) => {
+            setPrdReviewResult(review);
+          },
+        }
+      );
+      setPrdContent(result.final_prd);
+      setPrdReviewResult(result.review);
+      setPrdGenerationStage('done');
+      saveSession({ prdContent: result.final_prd, viewState: 'review-prd' });
       setViewState('review-prd');
     } catch (err) {
       console.error(err);
-      alert('生成 PRD 失败');
+      alert(getErrorMessage(err, '生成 PRD 失败'));
+      setPrdGenerationStage('error');
       setViewState('chatting');
     } finally {
       setStreamingContent('');
@@ -250,7 +298,7 @@ function App() {
       setViewState('review-api-docs');
     } catch (err) {
       console.error(err);
-      alert('生成接口文档失败');
+      alert(getErrorMessage(err, '生成接口文档失败'));
       setViewState('review-prd');
     } finally {
       setStreamingContent('');
@@ -276,7 +324,7 @@ function App() {
       setViewState('review-prompts');
     } catch (err) {
       console.error(err);
-      alert('生成提示词失败');
+      alert(getErrorMessage(err, '生成提示词失败'));
       setViewState(skipApiDocs ? 'review-prd' : 'review-api-docs');
     } finally {
       setStreamingContent('');
@@ -312,7 +360,7 @@ function App() {
       }
     } catch (err) {
       console.error(err);
-      alert('优化失败，请重试');
+      alert(getErrorMessage(err, '优化失败，请重试'));
     } finally {
       setStreamingContent('');
       setIsGenerating(false);
@@ -437,6 +485,8 @@ function App() {
             streamingContent={streamingContent}
             isGeneratingPhase={true}
             isGenerating={true}
+            generationStatusText={prdGenerationStatusText}
+            reviewResult={prdReviewResult}
             actions={[]}
             onSaveEdit={() => {}}
             onOptimize={() => {}}
@@ -450,6 +500,7 @@ function App() {
             content={prdContent}
             streamingContent={isGenerating ? streamingContent : undefined}
             isGenerating={isGenerating}
+            reviewResult={prdReviewResult}
             actions={[
               {
                 label: '返回对话',

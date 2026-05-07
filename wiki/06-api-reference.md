@@ -140,7 +140,49 @@ POST /api/conversation/generate-api-docs-stream
 
 需要提供已生成的 PRD 内容作为上下文。
 
+生成前，后端会先从本地 RAG 知识库检索团队接口规范和历史接口文档示例，再把相关片段注入接口文档生成 Prompt。当前示例知识库位于：
+
+- `backend/knowledge/api_docs/team-api-guidelines.md`
+- `backend/knowledge/api_docs/history-copywriting-api.md`
+- `backend/knowledge/api_docs/history-task-api.md`
+
+如果 RAG 内容与当前 PRD 冲突，以当前 PRD 为准；如果只是接口风格、响应结构、错误码、命名规范等约束，优先遵循 RAG 内容。
+
 **SSE 响应流**（同 PRD，内容为接口文档 Markdown）
+
+---
+
+### 生成接口文档前检索 RAG 参考资料
+
+```
+POST /api/conversation/retrieve-api-docs-rag
+```
+
+**请求体**
+```json
+{
+  "prd_content": "# PRD: ...",
+  "conversation_messages": []
+}
+```
+
+该接口用于在正式生成接口文档前，先检索团队接口规范和历史接口文档示例。`/v2` 会先展示命中的 RAG 片段，用户确认后才继续生成接口文档。
+
+**响应示例**
+```json
+{
+  "status": "completed",
+  "hits": [
+    {
+      "source": "team-api-guidelines.md",
+      "title": "路径命名",
+      "score": 0.42,
+      "content_preview": "基础路径统一使用 /api/v1...",
+      "content": "## 路径命名\n\n- 基础路径统一使用 `/api/v1`..."
+    }
+  ]
+}
+```
 
 ---
 

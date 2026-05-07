@@ -1,5 +1,12 @@
 import axios from 'axios';
-import type { PRDResponse, QuestionsConfig, Message } from '../types';
+import type {
+  GeneratePrdStreamResult,
+  PRDResponse,
+  PrdReviewResult,
+  QuestionsConfig,
+  Message,
+  RagHit,
+} from '../types';
 
 const apiClient = axios.create({
   baseURL: '/api',
@@ -11,7 +18,11 @@ const apiClient = axios.create({
 async function readStream(
   url: string,
   body: object,
-  onChunk: (text: string) => void
+  onChunk: (text: string) => void,
+  handlers?: {
+    onPhase?: (phase: string) => void;
+    onReview?: (review: PrdReviewResult) => void;
+  }
 ): Promise<any> {
   const response = await fetch(url, {
     method: 'POST',
@@ -44,7 +55,9 @@ async function readStream(
 
       const event = JSON.parse(data);
       if (event.type === 'error') throw new Error(event.message);
-      if (event.type === 'chunk') onChunk(event.content);
+      if (event.type === 'chunk' || event.type === 'text_delta') onChunk(event.content);
+      else if (event.type === 'phase') handlers?.onPhase?.(event.phase);
+      else if (event.type === 'review') handlers?.onReview?.(event.content);
       else if (event.type === 'done') result = event;
     }
   }
@@ -98,20 +111,34 @@ export const conversationApi = {
   /** 生成 PRD — 流式 */
   async generatePrdStream(
     conversationMessages: Message[],
-    onChunk: (text: string) => void
-  ): Promise<void> {
-    await readStream('/api/conversation/generate-prd-stream', { conversation_messages: conversationMessages }, onChunk);
+    onChunk: (text: string) => void,
+    handlers?: {
+      onPhase?: (phase: string) => void;
+      onReview?: (review: PrdReviewResult) => void;
+    }
+  ): Promise<GeneratePrdStreamResult> {
+    return readStream(
+      '/api/conversation/generate-prd-stream',
+      { conversation_messages: conversationMessages },
+      onChunk,
+      handlers
+    );
   },
 
   async generatePrdFromSummaryStream(
     requirementsSummary: Record<string, unknown>,
     conversationMessages: Message[],
-    onChunk: (text: string) => void
-  ): Promise<void> {
-    await readStream(
+    onChunk: (text: string) => void,
+    handlers?: {
+      onPhase?: (phase: string) => void;
+      onReview?: (review: PrdReviewResult) => void;
+    }
+  ): Promise<GeneratePrdStreamResult> {
+    return readStream(
       '/api/conversation/generate-prd-from-summary-stream',
       { requirements_summary: requirementsSummary, conversation_messages: conversationMessages },
-      onChunk
+      onChunk,
+      handlers
     );
   },
 
@@ -137,6 +164,17 @@ export const conversationApi = {
       { prd_content: prdContent, conversation_messages: conversationMessages },
       onChunk
     );
+  },
+
+  async retrieveApiDocsRag(
+    prdContent: string,
+    conversationMessages: Message[]
+  ): Promise<{ status: string; hits: RagHit[] }> {
+    const res = await apiClient.post('/conversation/retrieve-api-docs-rag', {
+      prd_content: prdContent,
+      conversation_messages: conversationMessages,
+    });
+    return res.data;
   },
 
   /** 生成 AI 提示词套件 — 流式 */
