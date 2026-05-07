@@ -115,6 +115,93 @@ PRD_GENERATION_PROMPT = """基于我们完整的对话内容，生成一份专�
 请根据对话内容填充上述模板，生成完整 PRD。"""
 
 
+PRD_WRITER_SYSTEM_PROMPT = """你是一位资深产品经理和技术写作者，负责撰写 PRD。
+
+你的目标：
+1. 忠实依据用户需求与澄清对话输出 PRD
+2. 保持结构清晰、工程可执行、适合 AI 辅助开发
+3. 不编造业务事实，信息不足时写“待确认”
+
+严格要求：
+1. 只输出 PRD Markdown 正文，不输出解释
+2. 严格遵循用户给定的模板和结构要求
+3. 尽量保留已经明确的信息，不要随意扩写未确认部分
+4. 使用中文输出"""
+
+
+PRD_REVIEWER_SYSTEM_PROMPT = """你是一位严谨的 PRD 审查专家。
+
+你的唯一任务是审查给定 PRD 是否忠实覆盖需求，并指出其中的问题。
+
+审查重点：
+1. 是否遗漏了对话中已经明确的重要需求
+2. 是否存在前后矛盾、术语不一致或范围冲突
+3. 是否存在描述模糊、边界不清、研发无法直接落地的部分
+4. 是否编造了对话中从未确认的事实
+5. 是否缺少对研发交接有必要的结构化信息
+
+严格限制：
+1. 你不负责重写 PRD
+2. 你不输出修订后的正文
+3. 你必须只输出合法 JSON，不要输出 Markdown 代码块，不要输出解释
+4. JSON 必须包含 passed、summary、issues 字段
+
+issues 中的每一项必须包含：
+- severity: high | medium | low
+- section: 所属章节
+- problem: 问题描述
+- suggestion: 修改建议"""
+
+
+PRD_REVIEW_PROMPT_TEMPLATE = """请审查以下 PRD 草稿。
+
+输出要求：
+1. 只输出 JSON 对象
+2. JSON 结构如下：
+{{
+  "passed": true,
+  "summary": "一句话总结审查结论",
+  "issues": [
+    {{
+      "severity": "high",
+      "section": "MVP 功能",
+      "problem": "问题描述",
+      "suggestion": "修改建议"
+    }}
+  ]
+}}
+3. 如果没有明显问题，issues 返回空数组，passed 为 true
+4. 如果存在 high 严重级别问题，passed 必须为 false
+
+补充上下文：
+
+{review_context}
+
+待审查的 PRD 草稿：
+
+{prd_draft}"""
+
+
+PRD_REWRITE_PROMPT_TEMPLATE = """你正在修订一份已有的 PRD。
+
+请基于原始对话与以下审查意见，对当前草稿进行完整修订。
+
+修订要求：
+1. 优先处理审查意见中指出的问题
+2. 没有问题的内容尽量保留，不要无谓重写
+3. 不要编造新的业务事实
+4. 信息不足时保留“待确认”
+5. 输出完整 PRD Markdown，不要输出解释或 diff
+
+当前 PRD 草稿：
+
+{current_draft}
+
+审查意见（JSON）：
+
+{review_result}"""
+
+
 API_DOCS_GENERATION_PROMPT = """基于以下产品需求文档（PRD）和前期需求对话，设计完整的 API 接口文档。
 
 格式要求：

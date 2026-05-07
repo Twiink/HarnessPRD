@@ -54,6 +54,41 @@ export interface PRDResponse {
   status: string;
 }
 
+export interface ReviewIssue {
+  severity: 'high' | 'medium' | 'low';
+  section: string;
+  problem: string;
+  suggestion: string;
+}
+
+export interface PrdReviewResult {
+  passed: boolean;
+  summary: string;
+  issues: ReviewIssue[];
+}
+
+export type PrdGenerationStage =
+  | 'idle'
+  | 'writing'
+  | 'reviewing'
+  | 'rewriting'
+  | 'done'
+  | 'error';
+
+export interface GeneratePrdStreamResult {
+  final_prd: string;
+  review: PrdReviewResult | null;
+  revision_applied: boolean;
+}
+
+export interface RagHit {
+  source: string;
+  title: string;
+  score: number;
+  content: string;
+  content_preview: string;
+}
+
 export interface ConfigResponse {
   default_llm_provider: string;
   default_llm_model: string;

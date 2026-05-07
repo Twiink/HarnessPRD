@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Sparkles, X, Loader2, FileText, Copy, Check as CheckIcon } from 'lucide-react';
-import type { DocAction } from '../types';
+import type { DocAction, PrdReviewResult } from '../types';
 
 interface DocumentReviewProps {
   title: string;
@@ -8,6 +8,8 @@ interface DocumentReviewProps {
   streamingContent?: string;
   isGenerating?: boolean;
   isGeneratingPhase?: boolean;
+  generationStatusText?: string;
+  reviewResult?: PrdReviewResult | null;
   actions: DocAction[];
   onSaveEdit: (content: string) => void;
   onOptimize: (instruction: string) => void;
@@ -19,6 +21,8 @@ export default function DocumentReview({
   streamingContent,
   isGenerating,
   isGeneratingPhase,
+  generationStatusText,
+  reviewResult,
   actions,
   onSaveEdit,
   onOptimize,
@@ -75,7 +79,7 @@ export default function DocumentReview({
           {(isGenerating || isGeneratingPhase) && (
             <span className="flex items-center gap-1 text-sm text-primary-500">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              {isGeneratingPhase ? '生成中...' : '优化中...'}
+              {isGeneratingPhase ? (generationStatusText || '生成中...') : '优化中...'}
             </span>
           )}
         </div>
@@ -99,6 +103,47 @@ export default function DocumentReview({
           spellCheck={false}
           placeholder={isGeneratingPhase ? '' : '内容将在此显示，可直接编辑...'}
         />
+
+        {reviewResult && (
+          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800">Review Agent 审查结果</h3>
+                <p className="mt-1 text-sm text-gray-600">{reviewResult.summary || '已完成审查。'}</p>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                reviewResult.passed
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}>
+                {reviewResult.passed ? '已通过' : '已提出修改'}
+              </span>
+            </div>
+
+            {reviewResult.issues.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {reviewResult.issues.map((issue, index) => (
+                  <div key={`${issue.section}-${index}`} className="rounded-md bg-gray-50 p-3">
+                    <div className="flex items-center gap-2 text-xs font-medium">
+                      <span className={`rounded px-2 py-0.5 ${
+                        issue.severity === 'high'
+                          ? 'bg-red-100 text-red-700'
+                          : issue.severity === 'medium'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        {issue.severity.toUpperCase()}
+                      </span>
+                      <span className="text-gray-500">{issue.section}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-800">{issue.problem}</p>
+                    <p className="mt-1 text-sm text-gray-600">建议：{issue.suggestion}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 底部操作区 */}

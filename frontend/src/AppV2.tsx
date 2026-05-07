@@ -5,7 +5,7 @@ import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import DocumentReview from './components/DocumentReview';
 import { conversationApi } from './services/api';
-import type { Message } from './types';
+import type { Message, PrdGenerationStage, PrdReviewResult, RagHit } from './types';
 
 type V2ViewState =
   | 'form'
@@ -101,7 +101,10 @@ type V2SessionData = {
   promptsContent?: string;
   manualPrdInput?: string;
   manualApiDocsInput?: string;
+  ragHits?: RagHit[];
+  pendingApiDocsPrd?: string;
   showJsonPreview?: boolean;
+  prdReviewResult?: PrdReviewResult | null;
 };
 
 const V2_SESSION_KEY = 'vibecoding_v2_session';
@@ -344,6 +347,13 @@ function diffTypeClass(changeType: SummaryDiffItem['changeType']): string {
   return 'bg-amber-100 text-amber-700 border-amber-200';
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return `${fallback}：${error.message}`;
+  }
+  return fallback;
+}
+
 function getStageIndex(viewState: V2ViewState, entryMode: EntryMode): number {
   if (viewState === 'form') {
     return entryMode === 'structured' ? 0 : entryMode === 'prd' ? 2 : 4;
@@ -483,12 +493,17 @@ export default function AppV2() {
   const [promptsContent, setPromptsContent] = useState('');
   const [manualPrdInput, setManualPrdInput] = useState('');
   const [manualApiDocsInput, setManualApiDocsInput] = useState('');
+  const [ragHits, setRagHits] = useState<RagHit[]>([]);
+  const [pendingApiDocsPrd, setPendingApiDocsPrd] = useState('');
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isRetrievingRag, setIsRetrievingRag] = useState(false);
   const [isSyncingSummary, setIsSyncingSummary] = useState(false);
   const [error, setError] = useState('');
   const [formErrors, setFormErrors] = useState<StructuredFormErrors>({});
   const [showJsonPreview, setShowJsonPreview] = useState(false);
+  const [prdGenerationStage, setPrdGenerationStage] = useState<PrdGenerationStage>('idle');
+  const [prdReviewResult, setPrdReviewResult] = useState<PrdReviewResult | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -506,7 +521,10 @@ export default function AppV2() {
     if (session.promptsContent) setPromptsContent(session.promptsContent);
     if (session.manualPrdInput) setManualPrdInput(session.manualPrdInput);
     if (session.manualApiDocsInput) setManualApiDocsInput(session.manualApiDocsInput);
+    if (session.ragHits) setRagHits(session.ragHits);
+    if (session.pendingApiDocsPrd) setPendingApiDocsPrd(session.pendingApiDocsPrd);
     if (typeof session.showJsonPreview === 'boolean') setShowJsonPreview(session.showJsonPreview);
+    if (session.prdReviewResult !== undefined) setPrdReviewResult(session.prdReviewResult);
   }, []);
 
   useEffect(() => {
@@ -523,7 +541,10 @@ export default function AppV2() {
       promptsContent,
       manualPrdInput,
       manualApiDocsInput,
+      ragHits,
+      pendingApiDocsPrd,
       showJsonPreview,
+      prdReviewResult,
     });
   }, [
     viewState,
@@ -538,7 +559,10 @@ export default function AppV2() {
     promptsContent,
     manualPrdInput,
     manualApiDocsInput,
+    ragHits,
+    pendingApiDocsPrd,
     showJsonPreview,
+    prdReviewResult,
   ]);
 
   const requirementsPreview = useMemo(
@@ -549,6 +573,12 @@ export default function AppV2() {
     () => getStageIndex(viewState, entryMode),
     [viewState, entryMode]
   );
+  const prdGenerationStatusText = useMemo(() => {
+    if (prdGenerationStage === 'writing') return 'Writer Agent 正在起草...';
+    if (prdGenerationStage === 'reviewing') return 'Review Agent 正在审查...';
+    if (prdGenerationStage === 'rewriting') return 'Writer Agent 正在修订...';
+    return '生成中...';
+  }, [prdGenerationStage]);
   const summaryDiff = useMemo(
     () => (requirementsSummary && pendingSummary ? collectSummaryDiff(requirementsSummary, pendingSummary) : []),
     [requirementsSummary, pendingSummary]
@@ -608,7 +638,7 @@ export default function AppV2() {
       setConversationId(result.conversation_id);
     } catch (err) {
       console.error(err);
-      setError('启动澄清对话失败，请检查后端配置');
+      setError(getErrorMessage(err, '启动澄清对话失败，请检查后端配置'));
       setViewState('form');
     } finally {
       setStreamingContent('');
@@ -637,11 +667,33 @@ export default function AppV2() {
       setMessages(result.messages);
     } catch (err) {
       console.error(err);
-      setError('继续对话失败');
+      setError(getErrorMessage(err, '继续对话失败'));
       setMessages(messages);
     } finally {
       setStreamingContent('');
       setIsStreaming(false);
+    }
+  };
+
+  const retrieveRagBeforeApiDocs = async (prd: string) => {
+    if (!prd.trim()) {
+      setError('缺少 PRD 内容，无法生成接口文档');
+      return;
+    }
+    setError('');
+    setRagHits([]);
+    setPendingApiDocsPrd(prd);
+    setIsRetrievingRag(true);
+    try {
+      const result = await conversationApi.retrieveApiDocsRag(prd, messages);
+      setRagHits(result.hits || []);
+      setError(result.hits?.length ? '已检索到接口规范与历史示例，请确认后生成接口文档。' : '未检索到 RAG 参考资料，确认后将仅基于 PRD 生成接口文档。');
+    } catch (err) {
+      console.error(err);
+      setError(getErrorMessage(err, '检索接口规范与历史示例失败'));
+      setPendingApiDocsPrd('');
+    } finally {
+      setIsRetrievingRag(false);
     }
   };
 
@@ -651,6 +703,8 @@ export default function AppV2() {
       return;
     }
     setError('');
+    setRagHits([]);
+    setPendingApiDocsPrd('');
     setApiDocsContent('');
     setStreamingContent('');
     setViewState('generating-api-docs');
@@ -665,7 +719,7 @@ export default function AppV2() {
       setViewState('review-api-docs');
     } catch (err) {
       console.error(err);
-      setError('生成接口文档失败');
+      setError(getErrorMessage(err, '生成接口文档失败'));
       setViewState('review-prd');
     } finally {
       setStreamingContent('');
@@ -692,7 +746,7 @@ export default function AppV2() {
       setViewState('review-prompts');
     } catch (err) {
       console.error(err);
-      setError('生成提示词失败');
+      setError(getErrorMessage(err, '生成提示词失败'));
       setViewState(apiDocs.trim() ? 'review-api-docs' : 'review-prd');
     } finally {
       setStreamingContent('');
@@ -706,24 +760,47 @@ export default function AppV2() {
     }
     setError('');
     setPrdContent('');
+    setPrdReviewResult(null);
     setStreamingContent('');
     setViewState('generating-prd');
+    setPrdGenerationStage('writing');
 
     let accumulated = '';
     try {
-      await conversationApi.generatePrdFromSummaryStream(
+      const result = await conversationApi.generatePrdFromSummaryStream(
         summary,
         messages,
         (chunk) => {
           accumulated += chunk;
           setStreamingContent(accumulated);
+        },
+        {
+          onPhase: (phase) => {
+            if (phase === 'writer_started') {
+              accumulated = '';
+              setPrdGenerationStage('writing');
+              setStreamingContent('');
+            } else if (phase === 'review_started') {
+              setPrdGenerationStage('reviewing');
+            } else if (phase === 'rewrite_started') {
+              accumulated = '';
+              setPrdGenerationStage('rewriting');
+              setStreamingContent('');
+            }
+          },
+          onReview: (review) => {
+            setPrdReviewResult(review);
+          },
         }
       );
-      setPrdContent(accumulated);
+      setPrdContent(result.final_prd);
+      setPrdReviewResult(result.review);
+      setPrdGenerationStage('done');
       setViewState('review-prd');
     } catch (err) {
       console.error(err);
-      setError('生成 PRD 失败');
+      setError(getErrorMessage(err, '生成 PRD 失败'));
+      setPrdGenerationStage('error');
       setViewState('chatting');
     } finally {
       setStreamingContent('');
@@ -757,7 +834,7 @@ export default function AppV2() {
       setError('已生成结构化摘要变更预览，请确认后生成 PRD。');
     } catch (err) {
       console.error(err);
-      setError('回填结构化摘要失败');
+      setError(getErrorMessage(err, '回填结构化摘要失败'));
     } finally {
       setIsSyncingSummary(false);
     }
@@ -771,12 +848,16 @@ export default function AppV2() {
     setMessages([]);
     setConversationId('');
     setPrdContent('');
+    setPrdReviewResult(null);
     setApiDocsContent('');
     setPromptsContent('');
     setManualPrdInput('');
     setManualApiDocsInput('');
+    setRagHits([]);
+    setPendingApiDocsPrd('');
     setStreamingContent('');
     setIsStreaming(false);
+    setIsRetrievingRag(false);
     setError('');
     setFormErrors({});
     localStorage.removeItem(V2_SESSION_KEY);
@@ -909,6 +990,70 @@ export default function AppV2() {
                   </div>
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(isRetrievingRag || pendingApiDocsPrd) && (
+        <div className="mx-auto mt-4 max-w-5xl rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-sky-950">
+                {isRetrievingRag ? '正在检索接口规范与历史示例...' : 'RAG 命中结果'}
+              </div>
+              <div className="mt-1 text-xs text-sky-800">
+                生成接口文档前，系统会先参考团队接口规范和历史接口文档示例。确认后才会进入正式生成。
+              </div>
+            </div>
+            {!isRetrievingRag && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setRagHits([]);
+                    setPendingApiDocsPrd('');
+                    setError('已取消本次接口文档生成。');
+                  }}
+                  className="rounded-lg border border-sky-300 bg-white px-3 py-2 text-xs text-sky-900 hover:bg-sky-100"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => void generateApiDocs(pendingApiDocsPrd)}
+                  className="rounded-lg bg-sky-900 px-3 py-2 text-xs font-medium text-white hover:bg-sky-800"
+                >
+                  确认使用这些参考资料生成
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="mt-4 space-y-3">
+            {isRetrievingRag && (
+              <div className="rounded-xl border border-sky-100 bg-white p-4 text-sm text-sky-800">
+                正在从本地知识库检索 `团队接口规范`、`历史接口文档示例` 等相关片段...
+              </div>
+            )}
+            {!isRetrievingRag && ragHits.length === 0 && (
+              <div className="rounded-xl border border-sky-100 bg-white p-4 text-sm text-sky-800">
+                没有命中可用参考资料。你仍然可以确认继续，系统会只基于当前 PRD 生成接口文档。
+              </div>
+            )}
+            {!isRetrievingRag && ragHits.map((hit, index) => (
+              <details key={`${hit.source}-${hit.title}-${index}`} className="rounded-xl border border-sky-100 bg-white p-4">
+                <summary className="cursor-pointer list-none">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">
+                      RAG-{index + 1}
+                    </span>
+                    <span className="text-sm font-medium text-slate-900">{hit.source} / {hit.title}</span>
+                    <span className="text-xs text-slate-400">score {hit.score}</span>
+                  </div>
+                  <div className="mt-2 text-xs leading-5 text-slate-600">{hit.content_preview}</div>
+                </summary>
+                <pre className="mt-3 max-h-72 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+                  {hit.content}
+                </pre>
+              </details>
             ))}
           </div>
         </div>
@@ -1137,7 +1282,7 @@ export default function AppV2() {
                 <button
                   onClick={() => {
                     setPrdContent(manualPrdInput);
-                    void generateApiDocs(manualPrdInput);
+                    void retrieveRagBeforeApiDocs(manualPrdInput);
                   }}
                   className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white hover:bg-slate-800"
                 >
@@ -1239,6 +1384,8 @@ export default function AppV2() {
           streamingContent={streamingContent}
           isGeneratingPhase={true}
           isGenerating={true}
+          generationStatusText={prdGenerationStatusText}
+          reviewResult={prdReviewResult}
           actions={[]}
           onSaveEdit={() => {}}
           onOptimize={() => {}}
@@ -1249,6 +1396,7 @@ export default function AppV2() {
         <DocumentReview
           title="产品需求文档（PRD）"
           content={prdContent}
+          reviewResult={prdReviewResult}
           actions={[
             {
               label: messages.length ? '返回对话' : '返回入口',
@@ -1268,7 +1416,7 @@ export default function AppV2() {
             {
               label: '生成接口文档 →',
               variant: 'primary',
-              onClick: () => void generateApiDocs(prdContent),
+              onClick: () => void retrieveRagBeforeApiDocs(prdContent),
             },
           ]}
           onSaveEdit={setPrdContent}

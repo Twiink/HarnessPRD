@@ -10,7 +10,7 @@ PIP_MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple/"
 # 国内 npm 镜像（淘宝）
 NPM_MIRROR="https://registry.npmmirror.com"
 
-echo "🚀 启动 VibeCoding..."
+echo "🚀 启动 HarnessPRD..."
 echo ""
 
 # 检查 Python

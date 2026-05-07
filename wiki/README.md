@@ -33,6 +33,9 @@
 ### 我想看 `/v2` 是怎么一步步做出来的
 → [v2record/README.md](./v2record/README.md)
 
+### 我想看这个项目是怎么被 Vibe Coding 出来的
+→ [v2record/09-vibe-coding-history-and-prompts.md](./v2record/09-vibe-coding-history-and-prompts.md)
+
 ### 我想快速启动项目
 → [10-deployment.md](./10-deployment.md#本地开发一键启动)
 
