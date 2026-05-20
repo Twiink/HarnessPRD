@@ -214,7 +214,7 @@ function App() {
     let accumulated = '';
     try {
       const result = await conversationApi.continueConversationStream(
-        conversationId, withUser, userInput,
+        conversationId, messages, userInput,
         (chunk) => { accumulated += chunk; setStreamingContent(accumulated); }
       );
       setMessages(result.messages);
