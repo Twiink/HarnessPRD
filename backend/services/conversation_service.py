@@ -114,7 +114,12 @@ class ConversationService:
     ) -> AsyncGenerator[Dict, None]:
         llm = get_llm()
         lc_messages = _build_lc_messages(messages)
-        lc_messages.append(HumanMessage(content=user_input))
+        last_message = lc_messages[-1] if lc_messages else None
+        if not (
+            isinstance(last_message, HumanMessage)
+            and last_message.content == user_input
+        ):
+            lc_messages.append(HumanMessage(content=user_input))
 
         full_content = ""
         async for chunk in llm.astream(lc_messages):
