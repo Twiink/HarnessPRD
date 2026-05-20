@@ -24,6 +24,7 @@ async def get_llm_providers():
                 "id": "anthropic",
                 "name": "Anthropic (Claude)",
                 "models": [
+                    "MiniMax-M2.5",
                     "claude-opus-4-6",
                     "claude-sonnet-4-6",
                     "claude-3-5-sonnet-20241022",
