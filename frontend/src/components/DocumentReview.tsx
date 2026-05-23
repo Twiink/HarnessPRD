@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Loader2, FileText, Copy, Check as CheckIcon } from 'lucide-react';
+import { Sparkles, X, Loader2, FileText, Copy, Download, Check as CheckIcon } from 'lucide-react';
 import type { DocAction, PrdReviewResult } from '../types';
 
 interface DocumentReviewProps {
@@ -10,9 +10,32 @@ interface DocumentReviewProps {
   isGeneratingPhase?: boolean;
   generationStatusText?: string;
   reviewResult?: PrdReviewResult | null;
+  /** 下载文件名，如 `朋友圈文案助手-PRD.md`；不传则根据标题自动推断 */
+  downloadFilename?: string;
   actions: DocAction[];
   onSaveEdit: (content: string) => void;
   onOptimize: (instruction: string) => void;
+}
+
+function downloadMarkdown(filename: string, content: string) {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.endsWith('.md') ? filename : `${filename}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function resolveDownloadFilename(title: string, custom?: string): string {
+  if (custom?.trim()) {
+    const name = custom.trim();
+    return name.endsWith('.md') ? name : `${name}.md`;
+  }
+  if (title.includes('PRD')) return 'PRD.md';
+  if (title.includes('接口')) return 'API-Docs.md';
+  if (title.includes('提示词')) return 'Prompts.md';
+  return 'document.md';
 }
 
 export default function DocumentReview({
@@ -23,6 +46,7 @@ export default function DocumentReview({
   isGeneratingPhase,
   generationStatusText,
   reviewResult,
+  downloadFilename,
   actions,
   onSaveEdit,
   onOptimize,
@@ -57,6 +81,11 @@ export default function DocumentReview({
     } catch {}
   };
 
+  const handleDownload = () => {
+    if (!displayContent.trim()) return;
+    downloadMarkdown(resolveDownloadFilename(title, downloadFilename), displayContent);
+  };
+
   const handleTextChange = (value: string) => {
     setEditContent(value);
     onSaveEdit(value);
@@ -70,9 +99,9 @@ export default function DocumentReview({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex h-full min-h-0 flex-col bg-white">
       {/* 顶部栏 */}
-      <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 border-b border-gray-100">
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 px-6 py-3">
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-primary-500" />
           <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
@@ -83,29 +112,43 @@ export default function DocumentReview({
             </span>
           )}
         </div>
-        <button
-          onClick={handleCopy}
-          disabled={!displayContent}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-30"
-        >
-          {copied ? <CheckIcon className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-          {copied ? '已复制' : '复制'}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleCopy}
+            disabled={!displayContent}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 disabled:opacity-30"
+          >
+            {copied ? <CheckIcon className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? '已复制' : '复制'}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={!displayContent}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 disabled:opacity-30"
+          >
+            <Download className="h-3.5 w-3.5" />
+            下载
+          </button>
+        </div>
       </div>
 
-      {/* 主体：始终为可编辑 textarea */}
-      <div className="flex-1 flex flex-col min-h-0 p-4">
-        <textarea
-          className="flex-1 w-full p-4 font-mono text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:bg-gray-50 disabled:text-gray-600"
-          value={displayContent}
-          onChange={(e) => !isReadOnly && handleTextChange(e.target.value)}
-          readOnly={isReadOnly}
-          spellCheck={false}
-          placeholder={isGeneratingPhase ? '' : '内容将在此显示，可直接编辑...'}
-        />
+      {/* 主体：textarea 用绝对定位填满剩余高度（避免 flex-1 在 textarea 上失效） */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+        <div className="relative min-h-[12rem] flex-1">
+          <textarea
+            className="absolute inset-0 h-full w-full resize-none rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:bg-gray-50 disabled:text-gray-600"
+            value={displayContent}
+            onChange={(e) => !isReadOnly && handleTextChange(e.target.value)}
+            readOnly={isReadOnly}
+            spellCheck={false}
+            placeholder={isGeneratingPhase ? '' : '内容将在此显示，可直接编辑...'}
+          />
+        </div>
 
         {reviewResult && (
-          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mt-4 flex-shrink-0 rounded-lg border border-gray-200 bg-white p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-gray-800">Review Agent 审查结果</h3>
