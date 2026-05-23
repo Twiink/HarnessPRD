@@ -498,6 +498,7 @@ function App() {
           <DocumentReview
             title="产品需求文档（PRD）"
             content={prdContent}
+            downloadFilename={`${productName}-PRD`}
             streamingContent={isGenerating ? streamingContent : undefined}
             isGenerating={isGenerating}
             reviewResult={prdReviewResult}
@@ -551,6 +552,7 @@ function App() {
           <DocumentReview
             title="接口文档"
             content={apiDocsContent}
+            downloadFilename={`${productName}-API-Docs`}
             streamingContent={isGenerating ? streamingContent : undefined}
             isGenerating={isGenerating}
 
@@ -592,6 +594,7 @@ function App() {
           <DocumentReview
             title="AI 提示词套件"
             content={promptsContent}
+            downloadFilename={`${productName}-Prompts`}
             streamingContent={isGenerating ? streamingContent : undefined}
             isGenerating={isGenerating}
             actions={[

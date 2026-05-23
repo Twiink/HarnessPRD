@@ -1,11 +1,13 @@
-import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { MessageSquare, Sparkles } from 'lucide-react';
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, MessageSquare, Sparkles } from 'lucide-react';
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import DocumentReview from './components/DocumentReview';
+import SummaryDiffPanel from './components/SummaryDiffPanel';
+import type { SummaryDiffItem } from './types/summaryDiff';
 import { conversationApi } from './services/api';
-import type { Message, PrdGenerationStage, PrdReviewResult, RagHit } from './types';
+import type { DocType, Message, PrdGenerationStage, PrdReviewResult, RagHit } from './types';
 
 type V2ViewState =
   | 'form'
@@ -81,12 +83,6 @@ type StructuredFormData = {
 };
 
 type StructuredFormErrors = Partial<Record<keyof StructuredFormData, string>>;
-type SummaryDiffItem = {
-  path: string;
-  changeType: 'added' | 'modified' | 'removed';
-  before: string;
-  after: string;
-};
 
 type V2SessionData = {
   viewState?: V2ViewState;
@@ -108,6 +104,8 @@ type V2SessionData = {
 };
 
 const V2_SESSION_KEY = 'vibecoding_v2_session';
+/** 全站内容区统一宽度，与顶栏对齐 */
+const V2_PAGE_CLASS = 'mx-auto w-full max-w-6xl px-6';
 
 const CLARIFICATION_SYSTEM_PROMPT = `你是一位资深产品经理，正在帮助用户补齐一份已经结构化过的产品需求摘要。
 
@@ -121,7 +119,7 @@ const CLARIFICATION_SYSTEM_PROMPT = `你是一位资深产品经理，正在帮�
 1. 不要生成 PRD
 2. 不要输出完整文档、完整模板、接口文档或大段结构化产物
 3. 不要说“我来为你生成 PRD”或直接进入文档撰写
-4. 在信息已经足够时，只需明确提示用户“如果没有更多补充，可以结束澄清”
+4. 在信息已经足够时，只需明确提示用户“如果没有更多补充，可以点击生成 PRD”
 
 使用中文回复。`;
 
@@ -335,23 +333,22 @@ function collectSummaryDiff(before: unknown, after: unknown, path = ''): Summary
   }];
 }
 
-function diffTypeLabel(changeType: SummaryDiffItem['changeType']): string {
-  if (changeType === 'added') return '新增';
-  if (changeType === 'removed') return '删除';
-  return '修改';
-}
-
-function diffTypeClass(changeType: SummaryDiffItem['changeType']): string {
-  if (changeType === 'added') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-  if (changeType === 'removed') return 'bg-rose-100 text-rose-700 border-rose-200';
-  return 'bg-amber-100 text-amber-700 border-amber-200';
-}
-
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
     return `${fallback}：${error.message}`;
   }
   return fallback;
+}
+
+const RAG_SOURCE_LABELS: Record<string, string> = {
+  'team-api-guidelines.md': '团队接口规范',
+  'history-copywriting-api.md': '历史接口示例（朋友圈文案助手）',
+  'history-task-api.md': '历史接口示例（任务管理）',
+};
+
+function formatRagSourceLabel(source: string): string {
+  const filename = source.split(/[/\\]/).pop() || source;
+  return RAG_SOURCE_LABELS[filename] || filename.replace(/\.(md|txt)$/i, '').replace(/[-_]/g, ' ');
 }
 
 function getStageIndex(viewState: V2ViewState, entryMode: EntryMode): number {
@@ -451,6 +448,38 @@ function validateStructuredForm(formData: StructuredFormData): StructuredFormErr
   return errors;
 }
 
+function isExampleFormData(data: StructuredFormData): boolean {
+  return (Object.keys(EXAMPLE_FORM) as (keyof StructuredFormData)[]).every((key) => data[key] === EXAMPLE_FORM[key]);
+}
+
+function FormCollapsibleSection({
+  title,
+  description,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  description?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details
+      open={defaultOpen}
+      className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50/80 [&::-webkit-details-marker]:hidden">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          {description && <div className="mt-0.5 text-xs text-slate-500">{description}</div>}
+        </div>
+        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="space-y-5 border-t border-slate-100 px-5 py-5">{children}</div>
+    </details>
+  );
+}
+
 function FieldLabel({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="space-y-1">
@@ -497,6 +526,7 @@ export default function AppV2() {
   const [pendingApiDocsPrd, setPendingApiDocsPrd] = useState('');
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isOptimizingDocument, setIsOptimizingDocument] = useState(false);
   const [isRetrievingRag, setIsRetrievingRag] = useState(false);
   const [isSyncingSummary, setIsSyncingSummary] = useState(false);
   const [error, setError] = useState('');
@@ -505,6 +535,8 @@ export default function AppV2() {
   const [prdGenerationStage, setPrdGenerationStage] = useState<PrdGenerationStage>('idle');
   const [prdReviewResult, setPrdReviewResult] = useState<PrdReviewResult | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
 
   useEffect(() => {
     const session = loadV2Session();
@@ -583,6 +615,14 @@ export default function AppV2() {
     () => (requirementsSummary && pendingSummary ? collectSummaryDiff(requirementsSummary, pendingSummary) : []),
     [requirementsSummary, pendingSummary]
   );
+  const isExampleFilled = useMemo(() => isExampleFormData(formData), [formData]);
+  const documentDownloadBasename = useMemo(
+    () =>
+      formData.product_name.trim() ||
+      requirementsSummary?.product_name?.trim() ||
+      'document',
+    [formData.product_name, requirementsSummary?.product_name]
+  );
   const stageItems = useMemo(
     () => [
       { index: 0, label: '结构化需求', enabled: entryMode === 'structured' || currentStageIndex >= 0, onClick: () => setViewState('form') },
@@ -601,6 +641,32 @@ export default function AppV2() {
     }
     return visible;
   }, [messages, streamingContent, isStreaming, viewState]);
+
+  const scrollChatToBottom = useCallback((instant = false) => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    if (instant) {
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, []);
+
+  const handleChatScroll = useCallback(() => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 96;
+  }, []);
+
+  useEffect(() => {
+    if (viewState !== 'chatting') return;
+    if (!shouldStickToBottomRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      scrollChatToBottom(isStreaming);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [displayMessages, streamingContent, isStreaming, viewState, scrollChatToBottom]);
 
   const updateField = (key: keyof StructuredFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -621,6 +687,7 @@ export default function AppV2() {
     setMessages([]);
     setStreamingContent('');
     setIsStreaming(true);
+    shouldStickToBottomRef.current = true;
     setViewState('chatting');
 
     let accumulated = '';
@@ -648,6 +715,7 @@ export default function AppV2() {
 
   const continueConversation = async (userInput: string) => {
     if (isStreaming) return;
+    shouldStickToBottomRef.current = true;
     const nextMessages: Message[] = [...messages, { role: 'human', content: userInput }];
     setMessages(nextMessages);
     setIsStreaming(true);
@@ -687,7 +755,6 @@ export default function AppV2() {
     try {
       const result = await conversationApi.retrieveApiDocsRag(prd, messages);
       setRagHits(result.hits || []);
-      setError(result.hits?.length ? '已检索到接口规范与历史示例，请确认后生成接口文档。' : '未检索到 RAG 参考资料，确认后将仅基于 PRD 生成接口文档。');
     } catch (err) {
       console.error(err);
       setError(getErrorMessage(err, '检索接口规范与历史示例失败'));
@@ -723,6 +790,42 @@ export default function AppV2() {
       setViewState('review-prd');
     } finally {
       setStreamingContent('');
+    }
+  };
+
+  const handleOptimizeDocument = async (
+    docType: DocType,
+    currentContent: string,
+    instruction: string,
+    context: string
+  ) => {
+    if (!currentContent.trim()) {
+      setError('当前文档为空，无法优化');
+      return;
+    }
+    setError('');
+    setIsOptimizingDocument(true);
+    setStreamingContent('');
+
+    let accumulated = '';
+    try {
+      await conversationApi.optimizeDocumentStream(docType, currentContent, instruction, context, (chunk) => {
+        accumulated += chunk;
+        setStreamingContent(accumulated);
+      });
+      if (docType === 'prd') {
+        setPrdContent(accumulated);
+      } else if (docType === 'api-docs') {
+        setApiDocsContent(accumulated);
+      } else {
+        setPromptsContent(accumulated);
+      }
+    } catch (err) {
+      console.error(err);
+      setError(getErrorMessage(err, '优化文档失败'));
+    } finally {
+      setStreamingContent('');
+      setIsOptimizingDocument(false);
     }
   };
 
@@ -831,7 +934,6 @@ export default function AppV2() {
         return;
       }
       setPendingSummary(updatedSummary);
-      setError('已生成结构化摘要变更预览，请确认后生成 PRD。');
     } catch (err) {
       console.error(err);
       setError(getErrorMessage(err, '回填结构化摘要失败'));
@@ -887,228 +989,280 @@ export default function AppV2() {
 
   const discardPendingSummary = () => {
     setPendingSummary(null);
-    setError('已取消本次回填预览。');
+  };
+
+  const isDocumentStage =
+    viewState === 'generating-prd' ||
+    viewState === 'review-prd' ||
+    viewState === 'generating-api-docs' ||
+    viewState === 'review-api-docs' ||
+    viewState === 'generating-prompts' ||
+    viewState === 'review-prompts';
+  const showApiDocsRagGate = isRetrievingRag || !!pendingApiDocsPrd;
+  const showSummaryDiffGate =
+    viewState === 'chatting' &&
+    (isSyncingSummary || (!!pendingSummary && summaryDiff.length > 0));
+
+  const cancelApiDocsRagGate = () => {
+    setRagHits([]);
+    setPendingApiDocsPrd('');
+    setIsRetrievingRag(false);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
+      <header className="z-20 flex-shrink-0 border-b border-slate-200 bg-white shadow-sm">
+        <div className={`${V2_PAGE_CLASS} flex items-center justify-between gap-4 py-3`}>
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white">
               <Sparkles className="h-4 w-4" />
             </div>
             <div>
               <div className="text-sm font-semibold text-slate-900">Vibe Coding v2</div>
-              <div className="text-xs text-slate-500">结构化需求 {'->'} 对话补齐 {'->'} PRD</div>
+              <div className="text-xs text-slate-500">结构化需求工作台</div>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={resetPage}
-              className="text-sm text-slate-500 hover:text-slate-800"
+              title="清空本次任务的全部进度与内容"
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:border-red-300 hover:bg-red-100"
             >
               结束当前任务
             </button>
             <a href="/" className="text-sm text-slate-500 hover:text-slate-800">返回旧版</a>
           </div>
         </div>
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-6 pb-4">
-          {stageItems.map((stage) => {
-            const isActive = currentStageIndex === stage.index;
-            const isDone = currentStageIndex > stage.index;
-            const canJump = stage.enabled;
-            return (
-              <button
-                key={stage.label}
-                onClick={stage.onClick}
-                disabled={!canJump || isActive}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                  isActive
-                    ? 'bg-slate-900 text-white'
-                    : isDone
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : canJump
-                    ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    : 'bg-slate-50 text-slate-300'
-                }`}
-              >
-                {stage.label}
-              </button>
-            );
-          })}
+
+        <div className="border-t border-slate-200 bg-slate-100/80">
+          <div className={`${V2_PAGE_CLASS} flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5`}>
+            <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500">流程进度</span>
+            <div
+              className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-lg border border-slate-200/80 bg-white p-1 shadow-sm"
+              role="navigation"
+              aria-label="流程进度"
+            >
+              {stageItems.map((stage) => {
+                const isActive = currentStageIndex === stage.index;
+                const isDone = currentStageIndex > stage.index;
+                const canJump = stage.enabled;
+                const disabledHint = !canJump && !isActive ? '完成前置步骤后可跳转' : undefined;
+                return (
+                  <button
+                    key={stage.label}
+                    type="button"
+                    onClick={stage.onClick}
+                    disabled={!canJump || isActive}
+                    title={disabledHint ?? (isDone ? '点击查看该阶段' : undefined)}
+                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                      isActive
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : isDone
+                        ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80 hover:bg-emerald-100'
+                        : canJump
+                        ? 'text-slate-700 hover:bg-slate-50'
+                        : 'cursor-not-allowed text-slate-300'
+                    }`}
+                  >
+                    {stage.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </header>
 
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {error && (
-        <div className="mx-auto mt-4 max-w-5xl rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className={`${V2_PAGE_CLASS} mt-4 flex-shrink-0 rounded-xl border border-red-200 bg-red-50 py-3 text-sm text-red-700`}>
           {error}
         </div>
       )}
 
-      {pendingSummary && (
-        <div className="mx-auto mt-4 max-w-5xl rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-sm font-semibold text-amber-900">结构化摘要变更预览</div>
-              <div className="mt-1 text-xs text-amber-800">
-                以下是 AI 根据澄清对话建议更新的字段。这里只展示有差异的项，确认后会直接生成 PRD。
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={discardPendingSummary}
-                className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-amber-900 hover:bg-amber-100"
-              >
-                取消
-              </button>
-              <button
-                onClick={applyPendingSummary}
-                className="rounded-lg bg-amber-900 px-3 py-2 text-xs font-medium text-white hover:bg-amber-800"
-              >
-                确认并生成 PRD
-              </button>
-            </div>
-          </div>
-          <div className="mt-4 space-y-3">
-            {summaryDiff.map((item) => (
-              <div key={item.path} className="rounded-xl border border-amber-200 bg-white p-4">
-                <div className="flex items-center gap-2">
-                  <div className="text-xs font-medium text-amber-900">{item.path}</div>
-                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${diffTypeClass(item.changeType)}`}>
-                    {diffTypeLabel(item.changeType)}
-                  </span>
-                </div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <div>
-                    <div className="mb-1 text-xs text-slate-500">回填前</div>
-                    <pre className="overflow-auto rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-700">{item.before}</pre>
-                  </div>
-                  <div>
-                    <div className="mb-1 text-xs text-slate-500">回填后</div>
-                    <pre className="overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">{item.after}</pre>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+      {showSummaryDiffGate && (
+        <div className={`${V2_PAGE_CLASS} flex min-h-0 flex-1 flex-col overflow-hidden`}>
+          <SummaryDiffPanel
+            items={summaryDiff}
+            loading={isSyncingSummary}
+            onConfirm={applyPendingSummary}
+            onCancel={discardPendingSummary}
+          />
         </div>
       )}
 
-      {(isRetrievingRag || pendingApiDocsPrd) && (
-        <div className="mx-auto mt-4 max-w-5xl rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-sm font-semibold text-sky-950">
-                {isRetrievingRag ? '正在检索接口规范与历史示例...' : 'RAG 命中结果'}
-              </div>
-              <div className="mt-1 text-xs text-sky-800">
-                生成接口文档前，系统会先参考团队接口规范和历史接口文档示例。确认后才会进入正式生成。
-              </div>
-            </div>
-            {!isRetrievingRag && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setRagHits([]);
-                    setPendingApiDocsPrd('');
-                    setError('已取消本次接口文档生成。');
-                  }}
-                  className="rounded-lg border border-sky-300 bg-white px-3 py-2 text-xs text-sky-900 hover:bg-sky-100"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={() => void generateApiDocs(pendingApiDocsPrd)}
-                  className="rounded-lg bg-sky-900 px-3 py-2 text-xs font-medium text-white hover:bg-sky-800"
-                >
-                  确认使用这些参考资料生成
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="mt-4 space-y-3">
-            {isRetrievingRag && (
-              <div className="rounded-xl border border-sky-100 bg-white p-4 text-sm text-sky-800">
-                正在从本地知识库检索 `团队接口规范`、`历史接口文档示例` 等相关片段...
-              </div>
-            )}
-            {!isRetrievingRag && ragHits.length === 0 && (
-              <div className="rounded-xl border border-sky-100 bg-white p-4 text-sm text-sky-800">
-                没有命中可用参考资料。你仍然可以确认继续，系统会只基于当前 PRD 生成接口文档。
-              </div>
-            )}
-            {!isRetrievingRag && ragHits.map((hit, index) => (
-              <details key={`${hit.source}-${hit.title}-${index}`} className="rounded-xl border border-sky-100 bg-white p-4">
-                <summary className="cursor-pointer list-none">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">
-                      RAG-{index + 1}
-                    </span>
-                    <span className="text-sm font-medium text-slate-900">{hit.source} / {hit.title}</span>
-                    <span className="text-xs text-slate-400">score {hit.score}</span>
-                  </div>
-                  <div className="mt-2 text-xs leading-5 text-slate-600">{hit.content_preview}</div>
-                </summary>
-                <pre className="mt-3 max-h-72 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">
-                  {hit.content}
-                </pre>
-              </details>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {viewState === 'form' && (
-        <div className="mx-auto max-w-5xl px-6 py-8">
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold text-slate-900">结构化需求录入</h1>
-            <p className="mt-2 text-sm text-slate-500">
-              这个页面既支持完整串联，也支持从 PRD 或提示词阶段直接开始。
+      {showApiDocsRagGate && (
+        <div className={`${V2_PAGE_CLASS} flex min-h-0 flex-1 flex-col py-6`}>
+          <div className="flex-shrink-0">
+            <h2 className="text-lg font-semibold text-slate-900">生成接口文档前 · 确认参考资料</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">
+              系统会从<strong className="font-medium text-slate-800">团队接口规范</strong>和
+              <strong className="font-medium text-slate-800">历史项目的接口文档</strong>
+              里查找与当前 PRD 相关的内容，作为生成时的参考。确认后才会开始写接口文档。
             </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {[
-                ['structured', '结构化需求'],
-                ['prd', '从 PRD 开始'],
-                ['prompts', '从提示词开始'],
-              ].map(([mode, label]) => (
-                <button
-                  key={mode}
-                  onClick={() => setEntryMode(mode as EntryMode)}
-                  className={`rounded-lg px-3 py-2 text-sm ${
-                    entryMode === mode
-                      ? 'bg-slate-900 text-white'
-                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+          </div>
+
+          <div className="mt-5 min-h-0 flex-1 overflow-y-auto">
+            {isRetrievingRag ? (
+              <div className="flex h-full min-h-[12rem] items-center justify-center rounded-xl border border-slate-200 bg-white p-8">
+                <div className="text-center">
+                  <div className="text-sm font-medium text-slate-800">正在查找相关规范与示例…</div>
+                  <p className="mt-2 text-sm text-slate-500">通常只需几秒钟</p>
+                </div>
+              </div>
+            ) : ragHits.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-6">
+                <div className="text-sm font-medium text-slate-800">未找到特别相关的团队资料</div>
+                <p className="mt-2 text-sm text-slate-600">
+                  将主要依据你当前的 PRD 生成接口文档，不会强行套用无关规范。
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600">
+                  找到 {ragHits.length} 段可能相关的资料，生成时会优先参考这些内容：
+                </p>
+                {ragHits.map((hit, index) => (
+                  <div
+                    key={`${hit.source}-${hit.title}-${index}`}
+                    className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-medium text-white">
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-900">{formatRagSourceLabel(hit.source)}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">章节：{hit.title}</div>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-700">{hit.content_preview}</p>
+                        <details className="mt-3">
+                          <summary className="cursor-pointer text-xs font-medium text-slate-500 hover:text-slate-800">
+                            查看完整原文
+                          </summary>
+                          <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+                            {hit.content}
+                          </pre>
+                        </details>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {!isRetrievingRag && (
+            <div className="mt-6 flex flex-shrink-0 flex-wrap items-center justify-end gap-3 border-t border-slate-200 pt-5">
+              <button
+                type="button"
+                onClick={cancelApiDocsRagGate}
+                className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                返回 PRD
+              </button>
+              <button
+                type="button"
+                onClick={() => void generateApiDocs(pendingApiDocsPrd)}
+                className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                开始生成接口文档
+              </button>
             </div>
-            <div className="mt-4 flex gap-3">
-              <button
-                onClick={() => {
-                  setFormData(EXAMPLE_FORM);
-                  setEntryMode('structured');
-                  setFormErrors({});
-                  setError('');
-                }}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          )}
+        </div>
+      )}
+
+      {viewState === 'form' && !showSummaryDiffGate && (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+        <main className={`${V2_PAGE_CLASS} py-8`}>
+          <div className="mb-6">
+            <h1 className="text-2xl font-semibold text-slate-900">结构化需求录入</h1>
+            <p className="mt-2 text-sm leading-relaxed text-slate-500">
+              填写结构化表单后进入澄清对话；若已有 PRD 或提示词素材，也可从中间环节切入。
+            </p>
+            <div className="mt-5 w-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-2 text-xs font-medium text-slate-500">本次从哪里开始</div>
+              <div
+                className="flex w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-100/80 p-1"
+                role="tablist"
+                aria-label="工作流起点"
               >
-                填充示例
-              </button>
-              <button
-                onClick={resetPage}
-                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
-              >
-                清空表单
-              </button>
-              <button
-                onClick={() => setShowJsonPreview((prev) => !prev)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                {showJsonPreview ? '隐藏 JSON 预览' : '查看 JSON 预览'}
-              </button>
+                {[
+                  ['structured', '从零开始'],
+                  ['prd', '从 PRD 开始'],
+                  ['prompts', '从提示词开始'],
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="tab"
+                    aria-selected={entryMode === mode}
+                    onClick={() => {
+                      setEntryMode(mode as EntryMode);
+                      if (mode !== 'structured') setShowJsonPreview(false);
+                    }}
+                    className={`flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium transition-colors sm:flex-none ${
+                      entryMode === mode
+                        ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {entryMode === 'structured' && (
+                <div className="mt-4 border-t border-slate-100 pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm text-slate-500">
+                      可填充示例、清空内容，或预览结构化 JSON。
+                    </p>
+                    {isExampleFilled && (
+                      <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                        当前为示例数据
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData(EXAMPLE_FORM);
+                        setFormErrors({});
+                        setError('');
+                      }}
+                      className="rounded-md px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                    >
+                      填充示例
+                    </button>
+                    <span className="text-slate-300" aria-hidden>
+                      ·
+                    </span>
+                    <button
+                      type="button"
+                      onClick={resetPage}
+                      title="将清空整次任务的全部内容与进度"
+                      className="rounded-md px-2 py-1 text-sm font-medium text-amber-800 hover:bg-amber-50"
+                    >
+                      清空全部
+                    </button>
+                    <span className="text-slate-300" aria-hidden>
+                      ·
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowJsonPreview((prev) => !prev)}
+                      className={`rounded-md px-2 py-1 text-sm font-medium ${
+                        showJsonPreview ? 'bg-slate-800 text-white' : 'text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {showJsonPreview ? '隐藏 JSON 预览' : '查看 JSON 预览'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1126,12 +1280,24 @@ export default function AppV2() {
 
           {entryMode === 'structured' && (
           <>
-          <div className="grid gap-8 lg:grid-cols-2">
-            <div className="space-y-5">
-              <div>
-                <FieldLabel title="产品名称" />
-                <TextInput invalid={!!formErrors.product_name} value={formData.product_name} onChange={(e) => updateField('product_name', e.target.value)} />
-                <FieldError message={formErrors.product_name} />
+          <div className="w-full space-y-4">
+            <FormCollapsibleSection title="产品与用户" description="名称、目标、用户与平台" defaultOpen>
+              <div className="grid gap-5 lg:grid-cols-2">
+                <div>
+                  <FieldLabel title="产品名称" />
+                  <TextInput invalid={!!formErrors.product_name} value={formData.product_name} onChange={(e) => updateField('product_name', e.target.value)} />
+                  <FieldError message={formErrors.product_name} />
+                </div>
+                <div>
+                  <FieldLabel title="平台" />
+                  <SelectInput invalid={!!formErrors.platform} value={formData.platform} onChange={(e) => updateField('platform', e.target.value)}>
+                    <option>网页应用（Web App）</option>
+                    <option>微信小程序</option>
+                    <option>App</option>
+                    <option>命令行工具（CLI）</option>
+                  </SelectInput>
+                  <FieldError message={formErrors.platform} />
+                </div>
               </div>
               <div>
                 <FieldLabel title="核心目标" hint="一句话写清楚产品解决什么问题" />
@@ -1143,16 +1309,9 @@ export default function AppV2() {
                 <TextArea invalid={!!formErrors.target_users} rows={4} placeholder={'微商\n销售\n自媒体从业者'} value={formData.target_users} onChange={(e) => updateField('target_users', e.target.value)} />
                 <FieldError message={formErrors.target_users} />
               </div>
-              <div>
-                <FieldLabel title="平台" />
-                <SelectInput invalid={!!formErrors.platform} value={formData.platform} onChange={(e) => updateField('platform', e.target.value)}>
-                  <option>网页应用（Web App）</option>
-                  <option>微信小程序</option>
-                  <option>App</option>
-                  <option>命令行工具（CLI）</option>
-                </SelectInput>
-                <FieldError message={formErrors.platform} />
-              </div>
+            </FormCollapsibleSection>
+
+            <FormCollapsibleSection title="功能与页面" description="MVP、页面结构与关键交互" defaultOpen>
               <div>
                 <FieldLabel title="MVP 功能" hint="每行一个功能，格式：功能名称｜功能描述｜用户价值（可选）" />
                 <TextArea invalid={!!formErrors.mvp_features} rows={8} placeholder={'场景分类选择｜提供 7 个预设场景标签供用户单选｜降低用户思考成本\n一次生成 3 条文案｜基于当前条件返回 3 条不同文案｜提升可选性'} value={formData.mvp_features} onChange={(e) => updateField('mvp_features', e.target.value)} />
@@ -1160,32 +1319,37 @@ export default function AppV2() {
               </div>
               <div>
                 <FieldLabel title="未来规划（v2+）" hint="每行一个功能" />
-                <TextArea rows={5} value={formData.v2_features} onChange={(e) => updateField('v2_features', e.target.value)} />
+                <TextArea rows={4} value={formData.v2_features} onChange={(e) => updateField('v2_features', e.target.value)} />
               </div>
               <div>
                 <FieldLabel title="页面结构" hint="每行一个页面，格式：页面名｜模块1,模块2｜备注（可选）" />
-                <TextArea invalid={!!formErrors.ui_pages} rows={6} placeholder={'输入页｜场景分类,场景描述,风格选择,生成按钮｜主输入视图\n结果页｜结果卡片,复制按钮,换一批按钮｜展示生成结果'} value={formData.ui_pages} onChange={(e) => updateField('ui_pages', e.target.value)} />
+                <TextArea invalid={!!formErrors.ui_pages} rows={5} placeholder={'输入页｜场景分类,场景描述,风格选择,生成按钮｜主输入视图\n结果页｜结果卡片,复制按钮,换一批按钮｜展示生成结果'} value={formData.ui_pages} onChange={(e) => updateField('ui_pages', e.target.value)} />
                 <FieldError message={formErrors.ui_pages} />
               </div>
               <div>
                 <FieldLabel title="关键交互" hint="每行一条关键流程或交互约束" />
-                <TextArea rows={4} value={formData.interaction_notes} onChange={(e) => updateField('interaction_notes', e.target.value)} />
+                <TextArea rows={3} value={formData.interaction_notes} onChange={(e) => updateField('interaction_notes', e.target.value)} />
               </div>
-            </div>
+            </FormCollapsibleSection>
 
-            <div className="space-y-5">
-              <div>
-                <FieldLabel title="视觉主题" />
-                <TextInput value={formData.design_theme} onChange={(e) => updateField('design_theme', e.target.value)} placeholder="例如：科技感暗色" />
+            <FormCollapsibleSection title="设计与体验" description="视觉主题与响应式要求" defaultOpen={false}>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div>
+                  <FieldLabel title="视觉主题" />
+                  <TextInput value={formData.design_theme} onChange={(e) => updateField('design_theme', e.target.value)} placeholder="例如：科技感暗色" />
+                </div>
+                <div>
+                  <FieldLabel title="是否要求响应式" />
+                  <SelectInput value={formData.responsive} onChange={(e) => updateField('responsive', e.target.value)}>
+                    <option>需要</option>
+                    <option>不需要</option>
+                  </SelectInput>
+                </div>
               </div>
-              <div>
-                <FieldLabel title="是否要求响应式" />
-                <SelectInput value={formData.responsive} onChange={(e) => updateField('responsive', e.target.value)}>
-                  <option>需要</option>
-                  <option>不需要</option>
-                </SelectInput>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+            </FormCollapsibleSection>
+
+            <FormCollapsibleSection title="技术约束" description="认证、存储、前后端与部署" defaultOpen={false}>
+              <div className="grid gap-5 sm:grid-cols-2">
                 <div>
                   <FieldLabel title="用户认证" />
                   <SelectInput value={formData.auth} onChange={(e) => updateField('auth', e.target.value)}>
@@ -1205,51 +1369,64 @@ export default function AppV2() {
                   </SelectInput>
                 </div>
               </div>
-              <div>
-                <FieldLabel title="前端技术约束" />
-                <TextInput value={formData.frontend} onChange={(e) => updateField('frontend', e.target.value)} placeholder="例如：React + TypeScript" />
+              <div className="grid gap-5 lg:grid-cols-2">
+                <div>
+                  <FieldLabel title="前端技术约束" />
+                  <TextInput value={formData.frontend} onChange={(e) => updateField('frontend', e.target.value)} placeholder="例如：React + TypeScript" />
+                </div>
+                <div>
+                  <FieldLabel title="后端技术约束" />
+                  <TextInput value={formData.backend} onChange={(e) => updateField('backend', e.target.value)} placeholder="例如：Serverless Function" />
+                </div>
               </div>
-              <div>
-                <FieldLabel title="后端技术约束" />
-                <TextInput value={formData.backend} onChange={(e) => updateField('backend', e.target.value)} placeholder="例如：Serverless Function" />
+              <div className="grid gap-5 lg:grid-cols-2">
+                <div>
+                  <FieldLabel title="部署方式" />
+                  <TextInput value={formData.deployment} onChange={(e) => updateField('deployment', e.target.value)} placeholder="例如：Vercel + Serverless" />
+                </div>
+                <div>
+                  <FieldLabel title="LLM 使用说明" />
+                  <TextArea rows={3} value={formData.llm_usage} onChange={(e) => updateField('llm_usage', e.target.value)} placeholder="例如：调用大模型一次生成 3 条朋友圈文案" />
+                </div>
               </div>
-              <div>
-                <FieldLabel title="部署方式" />
-                <TextInput value={formData.deployment} onChange={(e) => updateField('deployment', e.target.value)} placeholder="例如：Vercel + Serverless" />
+            </FormCollapsibleSection>
+
+            <FormCollapsibleSection title="非功能与范围" description="安全、性能、可用性与本期边界" defaultOpen={false}>
+              <div className="grid gap-5 lg:grid-cols-3">
+                <div>
+                  <FieldLabel title="安全要求" hint="每行一条" />
+                  <TextArea rows={4} value={formData.security_requirements} onChange={(e) => updateField('security_requirements', e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel title="性能要求" hint="每行一条" />
+                  <TextArea rows={4} value={formData.performance_requirements} onChange={(e) => updateField('performance_requirements', e.target.value)} />
+                </div>
+                <div>
+                  <FieldLabel title="可用性要求" hint="每行一条" />
+                  <TextArea rows={4} value={formData.usability_requirements} onChange={(e) => updateField('usability_requirements', e.target.value)} />
+                </div>
               </div>
-              <div>
-                <FieldLabel title="LLM 使用说明" />
-                <TextArea rows={4} value={formData.llm_usage} onChange={(e) => updateField('llm_usage', e.target.value)} placeholder="例如：调用大模型一次生成 3 条朋友圈文案" />
+              <div className="grid gap-5 lg:grid-cols-2">
+                <div>
+                  <FieldLabel title="在范围内" hint="每行一条" />
+                  <TextArea invalid={!!formErrors.in_scope} rows={4} value={formData.in_scope} onChange={(e) => updateField('in_scope', e.target.value)} />
+                  <FieldError message={formErrors.in_scope} />
+                </div>
+                <div>
+                  <FieldLabel title="不在范围内（本期）" hint="每行一条" />
+                  <TextArea invalid={!!formErrors.out_of_scope} rows={4} value={formData.out_of_scope} onChange={(e) => updateField('out_of_scope', e.target.value)} />
+                  <FieldError message={formErrors.out_of_scope} />
+                </div>
               </div>
-              <div>
-                <FieldLabel title="安全要求" hint="每行一条" />
-                <TextArea rows={4} value={formData.security_requirements} onChange={(e) => updateField('security_requirements', e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel title="性能要求" hint="每行一条" />
-                <TextArea rows={4} value={formData.performance_requirements} onChange={(e) => updateField('performance_requirements', e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel title="可用性要求" hint="每行一条" />
-                <TextArea rows={4} value={formData.usability_requirements} onChange={(e) => updateField('usability_requirements', e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel title="在范围内" hint="每行一条" />
-                <TextArea invalid={!!formErrors.in_scope} rows={4} value={formData.in_scope} onChange={(e) => updateField('in_scope', e.target.value)} />
-                <FieldError message={formErrors.in_scope} />
-              </div>
-              <div>
-                <FieldLabel title="不在范围内（本期）" hint="每行一条" />
-                <TextArea invalid={!!formErrors.out_of_scope} rows={4} value={formData.out_of_scope} onChange={(e) => updateField('out_of_scope', e.target.value)} />
-                <FieldError message={formErrors.out_of_scope} />
-              </div>
-            </div>
+            </FormCollapsibleSection>
           </div>
 
-          <div className="mt-8 flex justify-end">
+          <div className="mt-6 flex flex-col gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-500">填写完成后进入澄清对话，AI 将围绕结构化摘要补齐缺失信息。</p>
             <button
+              type="button"
               onClick={startStructuredConversation}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white hover:bg-slate-800"
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-800"
             >
               <MessageSquare className="h-4 w-4" />
               开始澄清对话
@@ -1259,12 +1436,12 @@ export default function AppV2() {
           )}
 
           {entryMode === 'prd' && (
-            <div className="space-y-6">
+            <div className="space-y-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <div>
                 <FieldLabel title="PRD 内容" hint="粘贴现成 PRD 后，可以直接进入 PRD 阶段或继续生成接口文档/提示词" />
                 <TextArea rows={20} value={manualPrdInput} onChange={(e) => setManualPrdInput(e.target.value)} placeholder="在这里粘贴完整 PRD..." />
               </div>
-              <div className="flex flex-wrap justify-end gap-3">
+              <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-5">
                 <button
                   onClick={() => {
                     if (!manualPrdInput.trim()) {
@@ -1293,7 +1470,7 @@ export default function AppV2() {
           )}
 
           {entryMode === 'prompts' && (
-            <div className="space-y-6">
+            <div className="space-y-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <div>
                 <FieldLabel title="PRD 内容" hint="生成提示词时，PRD 为必填" />
                 <TextArea rows={14} value={manualPrdInput} onChange={(e) => setManualPrdInput(e.target.value)} placeholder="在这里粘贴完整 PRD..." />
@@ -1302,7 +1479,7 @@ export default function AppV2() {
                 <FieldLabel title="接口文档内容（可选）" hint="如果已有接口文档，提示词会更完整" />
                 <TextArea rows={14} value={manualApiDocsInput} onChange={(e) => setManualApiDocsInput(e.target.value)} placeholder="可选：粘贴接口文档..." />
               </div>
-              <div className="flex flex-wrap justify-end gap-3">
+              <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-5">
                 <button
                   onClick={() => {
                     if (!manualPrdInput.trim()) {
@@ -1335,167 +1512,213 @@ export default function AppV2() {
               </div>
             </div>
           )}
+        </main>
         </div>
       )}
 
-      {viewState === 'chatting' && (
-        <div className="flex h-[calc(100vh-73px)] flex-col">
-          <div className="border-b border-slate-200 bg-white px-6 py-3">
-            <div className="mx-auto flex max-w-5xl items-center justify-between">
-              <div>
+      {viewState === 'chatting' && !showSummaryDiffGate && (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-shrink-0 border-b border-slate-200 bg-white py-3">
+            <div className={`${V2_PAGE_CLASS} flex flex-wrap items-center justify-between gap-3`}>
+              <div className="min-w-0">
                 <div className="text-sm font-medium text-slate-900">澄清对话</div>
                 <div className="text-xs text-slate-500">AI 会围绕结构化摘要补齐不清晰项</div>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => setViewState('form')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewState('form')}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+                >
                   返回表单
                 </button>
-                <button onClick={resetPage} className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50">
+                <button
+                  type="button"
+                  onClick={resetPage}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+                >
                   结束任务
                 </button>
                 <button
+                  type="button"
                   onClick={syncSummaryBackToForm}
                   disabled={isStreaming || isSyncingSummary}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                 >
-                  {isSyncingSummary ? '处理中...' : '结束澄清'}
+                  {isSyncingSummary ? '分析对话中…' : '生成 PRD'}
                 </button>
               </div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-4xl">
+          <div
+            ref={chatScrollRef}
+            onScroll={handleChatScroll}
+            className="min-h-0 flex-1 overflow-y-auto bg-slate-50/40"
+          >
+            <div className={V2_PAGE_CLASS}>
               <MessageList messages={displayMessages} loading={isStreaming && streamingContent === ''} />
-              <div ref={messagesEndRef} />
+              <div ref={messagesEndRef} className="h-px shrink-0" aria-hidden />
             </div>
           </div>
-          <div className="border-t border-slate-200 bg-white px-4 pb-4 pt-3">
-            <div className="mx-auto max-w-4xl">
+          <div className="flex-shrink-0 border-t border-slate-200 bg-white pb-4 pt-3">
+            <div className={V2_PAGE_CLASS}>
               <ChatInput onSend={continueConversation} loading={isStreaming} />
             </div>
           </div>
         </div>
       )}
 
-      {viewState === 'generating-prd' && (
-        <DocumentReview
-          title="产品需求文档（PRD）"
-          content=""
-          streamingContent={streamingContent}
-          isGeneratingPhase={true}
-          isGenerating={true}
-          generationStatusText={prdGenerationStatusText}
-          reviewResult={prdReviewResult}
-          actions={[]}
-          onSaveEdit={() => {}}
-          onOptimize={() => {}}
-        />
-      )}
+      {isDocumentStage && !showApiDocsRagGate && (
+        <div className="min-h-0 flex-1">
+          {viewState === 'generating-prd' && (
+            <DocumentReview
+              title="产品需求文档（PRD）"
+              content=""
+              streamingContent={streamingContent}
+              isGeneratingPhase={true}
+              isGenerating={true}
+              generationStatusText={prdGenerationStatusText}
+              reviewResult={prdReviewResult}
+              actions={[]}
+              onSaveEdit={() => {}}
+              onOptimize={() => {}}
+            />
+          )}
 
-      {viewState === 'review-prd' && (
-        <DocumentReview
-          title="产品需求文档（PRD）"
-          content={prdContent}
-          reviewResult={prdReviewResult}
-          actions={[
-            {
-              label: messages.length ? '返回对话' : '返回入口',
-              variant: 'secondary',
-              onClick: goBackFromReviewPrd,
-            },
-            {
-              label: '结束任务',
-              variant: 'ghost',
-              onClick: resetPage,
-            },
-            {
-              label: '直接生成提示词',
-              variant: 'secondary',
-              onClick: () => void generatePrompts(prdContent, ''),
-            },
-            {
-              label: '生成接口文档 →',
-              variant: 'primary',
-              onClick: () => void retrieveRagBeforeApiDocs(prdContent),
-            },
-          ]}
-          onSaveEdit={setPrdContent}
-          onOptimize={() => {}}
-        />
-      )}
+          {viewState === 'review-prd' && (
+            <DocumentReview
+              title="产品需求文档（PRD）"
+              content={prdContent}
+              downloadFilename={`${documentDownloadBasename}-PRD`}
+              streamingContent={isOptimizingDocument ? streamingContent : undefined}
+              isGenerating={isOptimizingDocument}
+              reviewResult={prdReviewResult}
+              actions={[
+                {
+                  label: messages.length ? '返回对话' : '返回入口',
+                  variant: 'secondary',
+                  onClick: goBackFromReviewPrd,
+                  disabled: isOptimizingDocument,
+                },
+                {
+                  label: '结束任务',
+                  variant: 'ghost',
+                  onClick: resetPage,
+                  disabled: isOptimizingDocument,
+                },
+                {
+                  label: '直接生成提示词',
+                  variant: 'secondary',
+                  onClick: () => void generatePrompts(prdContent, ''),
+                  disabled: isOptimizingDocument,
+                },
+                {
+                  label: '生成接口文档 →',
+                  variant: 'primary',
+                  onClick: () => void retrieveRagBeforeApiDocs(prdContent),
+                  disabled: isOptimizingDocument,
+                },
+              ]}
+              onSaveEdit={setPrdContent}
+              onOptimize={(instruction) => void handleOptimizeDocument('prd', prdContent, instruction, '')}
+            />
+          )}
 
-      {viewState === 'generating-api-docs' && (
-        <DocumentReview
-          title="接口文档"
-          content=""
-          streamingContent={streamingContent}
-          isGeneratingPhase={true}
-          isGenerating={true}
-          actions={[]}
-          onSaveEdit={() => {}}
-          onOptimize={() => {}}
-        />
-      )}
+          {viewState === 'generating-api-docs' && (
+            <DocumentReview
+              title="接口文档"
+              content=""
+              streamingContent={streamingContent}
+              isGeneratingPhase={true}
+              isGenerating={true}
+              actions={[]}
+              onSaveEdit={() => {}}
+              onOptimize={() => {}}
+            />
+          )}
 
-      {viewState === 'review-api-docs' && (
-        <DocumentReview
-          title="接口文档"
-          content={apiDocsContent}
-          actions={[
-            {
-              label: '返回 PRD',
-              variant: 'secondary',
-              onClick: () => setViewState('review-prd'),
-            },
-            {
-              label: '结束任务',
-              variant: 'ghost',
-              onClick: resetPage,
-            },
-            {
-              label: '生成提示词 →',
-              variant: 'primary',
-              onClick: () => void generatePrompts(prdContent, apiDocsContent),
-            },
-          ]}
-          onSaveEdit={setApiDocsContent}
-          onOptimize={() => {}}
-        />
-      )}
+          {viewState === 'review-api-docs' && (
+            <DocumentReview
+              title="接口文档"
+              content={apiDocsContent}
+              downloadFilename={`${documentDownloadBasename}-API-Docs`}
+              streamingContent={isOptimizingDocument ? streamingContent : undefined}
+              isGenerating={isOptimizingDocument}
+              actions={[
+                {
+                  label: '返回 PRD',
+                  variant: 'secondary',
+                  onClick: () => setViewState('review-prd'),
+                  disabled: isOptimizingDocument,
+                },
+                {
+                  label: '结束任务',
+                  variant: 'ghost',
+                  onClick: resetPage,
+                  disabled: isOptimizingDocument,
+                },
+                {
+                  label: '生成提示词 →',
+                  variant: 'primary',
+                  onClick: () => void generatePrompts(prdContent, apiDocsContent),
+                  disabled: isOptimizingDocument,
+                },
+              ]}
+              onSaveEdit={setApiDocsContent}
+              onOptimize={(instruction) =>
+                void handleOptimizeDocument('api-docs', apiDocsContent, instruction, prdContent)
+              }
+            />
+          )}
 
-      {viewState === 'generating-prompts' && (
-        <DocumentReview
-          title="提示词套件"
-          content=""
-          streamingContent={streamingContent}
-          isGeneratingPhase={true}
-          isGenerating={true}
-          actions={[]}
-          onSaveEdit={() => {}}
-          onOptimize={() => {}}
-        />
-      )}
+          {viewState === 'generating-prompts' && (
+            <DocumentReview
+              title="提示词套件"
+              content=""
+              streamingContent={streamingContent}
+              isGeneratingPhase={true}
+              isGenerating={true}
+              actions={[]}
+              onSaveEdit={() => {}}
+              onOptimize={() => {}}
+            />
+          )}
 
-      {viewState === 'review-prompts' && (
-        <DocumentReview
-          title="提示词套件"
-          content={promptsContent}
-          actions={[
-            {
-              label: apiDocsContent.trim() ? '返回接口文档' : '返回 PRD',
-              variant: 'secondary',
-              onClick: () => setViewState(apiDocsContent.trim() ? 'review-api-docs' : 'review-prd'),
-            },
-            {
-              label: '结束任务',
-              variant: 'ghost',
-              onClick: resetPage,
-            },
-          ]}
-          onSaveEdit={setPromptsContent}
-          onOptimize={() => {}}
-        />
+          {viewState === 'review-prompts' && (
+            <DocumentReview
+              title="提示词套件"
+              content={promptsContent}
+              downloadFilename={`${documentDownloadBasename}-Prompts`}
+              streamingContent={isOptimizingDocument ? streamingContent : undefined}
+              isGenerating={isOptimizingDocument}
+              actions={[
+                {
+                  label: apiDocsContent.trim() ? '返回接口文档' : '返回 PRD',
+                  variant: 'secondary',
+                  onClick: () => setViewState(apiDocsContent.trim() ? 'review-api-docs' : 'review-prd'),
+                  disabled: isOptimizingDocument,
+                },
+                {
+                  label: '结束任务',
+                  variant: 'ghost',
+                  onClick: resetPage,
+                  disabled: isOptimizingDocument,
+                },
+              ]}
+              onSaveEdit={setPromptsContent}
+              onOptimize={(instruction) =>
+                void handleOptimizeDocument(
+                  'prompts',
+                  promptsContent,
+                  instruction,
+                  `${prdContent}\n\n${apiDocsContent}`
+                )
+              }
+            />
+          )}
+        </div>
       )}
+      </div>
     </div>
   );
 }
