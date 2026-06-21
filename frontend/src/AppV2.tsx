@@ -1,6 +1,16 @@
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronDown, MessageSquare, Sparkles } from 'lucide-react';
+import {
+  consumeSkipNextSessionLoad,
+  debouncedSaveSession,
+  flushPendingSave,
+  loadSession,
+  markSkipNextSessionLoad,
+  saveSession,
+  type V2SessionData,
+} from './services/sessionService';
 import MessageList from './components/MessageList';
 import ChatInput from './components/ChatInput';
 import DocumentReview from './components/DocumentReview';
@@ -84,26 +94,6 @@ type StructuredFormData = {
 
 type StructuredFormErrors = Partial<Record<keyof StructuredFormData, string>>;
 
-type V2SessionData = {
-  viewState?: V2ViewState;
-  entryMode?: EntryMode;
-  formData?: StructuredFormData;
-  requirementsSummary?: RequirementsSummary | null;
-  pendingSummary?: RequirementsSummary | null;
-  messages?: Message[];
-  conversationId?: string;
-  prdContent?: string;
-  apiDocsContent?: string;
-  promptsContent?: string;
-  manualPrdInput?: string;
-  manualApiDocsInput?: string;
-  ragHits?: RagHit[];
-  pendingApiDocsPrd?: string;
-  showJsonPreview?: boolean;
-  prdReviewResult?: PrdReviewResult | null;
-};
-
-const V2_SESSION_KEY = 'vibecoding_v2_session';
 /** 全站内容区统一宽度，与顶栏对齐 */
 const V2_PAGE_CLASS = 'mx-auto w-full max-w-6xl px-6';
 
@@ -361,29 +351,74 @@ function getStageIndex(viewState: V2ViewState, entryMode: EntryMode): number {
   return 4;
 }
 
-function saveV2Session(data: V2SessionData) {
-  try {
-    localStorage.setItem(V2_SESSION_KEY, JSON.stringify(data));
-  } catch {}
+function getVisibleClarificationMessages(messages: Message[]): Message[] {
+  return messages.filter((m) => m.role !== 'system').slice(1);
 }
 
-function loadV2Session(): V2SessionData | null {
-  try {
-    const raw = localStorage.getItem(V2_SESSION_KEY);
-    if (!raw) return null;
-    const session = JSON.parse(raw) as V2SessionData;
-    if (session.viewState?.startsWith('generating-')) {
-      const fallback: Record<string, V2ViewState> = {
-        'generating-prd': session.prdContent ? 'review-prd' : 'form',
-        'generating-api-docs': session.apiDocsContent ? 'review-api-docs' : 'review-prd',
-        'generating-prompts': session.promptsContent ? 'review-prompts' : session.apiDocsContent ? 'review-api-docs' : 'review-prd',
-      };
-      session.viewState = fallback[session.viewState] ?? 'form';
-    }
-    return session;
-  } catch {
-    return null;
+function hasClarificationContent(messages: Message[]): boolean {
+  return getVisibleClarificationMessages(messages).some((m) => m.content?.trim());
+}
+
+function repairStaleViewState(session: V2SessionData): V2ViewState {
+  const viewState = session.viewState || 'form';
+  const messages = session.messages || [];
+
+  if (viewState === 'chatting' && !hasClarificationContent(messages)) {
+    return 'form';
   }
+
+  if (viewState !== 'form') {
+    return viewState;
+  }
+
+  const hasPrd = Boolean(session.prdContent?.trim());
+  const hasApiDocs = Boolean(session.apiDocsContent?.trim());
+  const hasPrompts = Boolean(session.promptsContent?.trim());
+
+  if (hasPrompts) return 'review-prompts';
+  if (hasApiDocs) return 'review-api-docs';
+  if (hasPrd) return 'review-prd';
+  if (hasClarificationContent(messages) && session.entryMode === 'structured') return 'chatting';
+  return 'form';
+}
+
+function applySessionData(
+  session: V2SessionData,
+  setters: {
+    setViewState: (v: V2ViewState) => void;
+    setEntryMode: (v: EntryMode) => void;
+    setFormData: (v: StructuredFormData) => void;
+    setRequirementsSummary: (v: RequirementsSummary | null) => void;
+    setPendingSummary: (v: RequirementsSummary | null) => void;
+    setMessages: (v: Message[]) => void;
+    setConversationId: (v: string) => void;
+    setPrdContent: (v: string) => void;
+    setApiDocsContent: (v: string) => void;
+    setPromptsContent: (v: string) => void;
+    setManualPrdInput: (v: string) => void;
+    setManualApiDocsInput: (v: string) => void;
+    setRagHits: (v: RagHit[]) => void;
+    setPendingApiDocsPrd: (v: string) => void;
+    setShowJsonPreview: (v: boolean) => void;
+    setPrdReviewResult: (v: PrdReviewResult | null) => void;
+  }
+) {
+  if (session.viewState) setters.setViewState(repairStaleViewState(session));
+  if (session.entryMode) setters.setEntryMode(session.entryMode);
+  if (session.formData) setters.setFormData(session.formData);
+  if (session.requirementsSummary !== undefined) setters.setRequirementsSummary(session.requirementsSummary);
+  if (session.pendingSummary !== undefined) setters.setPendingSummary(session.pendingSummary);
+  if (session.messages) setters.setMessages(session.messages);
+  if (session.conversationId) setters.setConversationId(session.conversationId);
+  if (session.prdContent) setters.setPrdContent(session.prdContent);
+  if (session.apiDocsContent) setters.setApiDocsContent(session.apiDocsContent);
+  if (session.promptsContent) setters.setPromptsContent(session.promptsContent);
+  if (session.manualPrdInput) setters.setManualPrdInput(session.manualPrdInput);
+  if (session.manualApiDocsInput) setters.setManualApiDocsInput(session.manualApiDocsInput);
+  if (session.ragHits) setters.setRagHits(session.ragHits);
+  if (session.pendingApiDocsPrd) setters.setPendingApiDocsPrd(session.pendingApiDocsPrd);
+  if (typeof session.showJsonPreview === 'boolean') setters.setShowJsonPreview(session.showJsonPreview);
+  if (session.prdReviewResult !== undefined) setters.setPrdReviewResult(session.prdReviewResult);
 }
 
 function buildConversationSeed(summary: RequirementsSummary): string {
@@ -509,7 +544,54 @@ function SelectInput(props: SelectHTMLAttributes<HTMLSelectElement> & { invalid?
   return <select {...rest} className={`w-full rounded-lg border px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 ${invalid ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-primary-500'} ${className || ''}`} />;
 }
 
+type SessionLoadState = 'idle' | 'loading' | 'ready' | 'not_found' | 'error';
+
+function SessionLoadErrorPage({
+  title,
+  description,
+  onGoList,
+  onGoNew,
+}: {
+  title: string;
+  description: string;
+  onGoList: () => void;
+  onGoNew: () => void;
+}) {
+  return (
+    <div className="flex h-screen flex-col items-center justify-center bg-slate-50 px-6">
+      <div className="max-w-md text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white">
+          <Sparkles className="h-5 w-5" />
+        </div>
+        <h1 className="mt-6 text-lg font-semibold text-slate-900">{title}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-500">{description}</p>
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <button
+            type="button"
+            onClick={onGoList}
+            className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            查看我的方案
+          </button>
+          <button
+            type="button"
+            onClick={onGoNew}
+            className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            新建方案
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AppV2() {
+  const navigate = useNavigate();
+  const { id: routeId } = useParams<{ id: string }>();
+  const [sessionId, setSessionId] = useState<string | undefined>(routeId);
+  const [isSavingSession, setIsSavingSession] = useState(false);
+  const [sessionLoadState, setSessionLoadState] = useState<SessionLoadState>(routeId ? 'loading' : 'idle');
   const [viewState, setViewState] = useState<V2ViewState>('form');
   const [entryMode, setEntryMode] = useState<EntryMode>('structured');
   const [formData, setFormData] = useState<StructuredFormData>(DEFAULT_FORM);
@@ -538,47 +620,24 @@ export default function AppV2() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
 
-  useEffect(() => {
-    const session = loadV2Session();
-    if (!session) return;
-    if (session.viewState) setViewState(session.viewState);
-    if (session.entryMode) setEntryMode(session.entryMode);
-    if (session.formData) setFormData(session.formData);
-    if (session.requirementsSummary !== undefined) setRequirementsSummary(session.requirementsSummary);
-    if (session.pendingSummary !== undefined) setPendingSummary(session.pendingSummary);
-    if (session.messages) setMessages(session.messages);
-    if (session.conversationId) setConversationId(session.conversationId);
-    if (session.prdContent) setPrdContent(session.prdContent);
-    if (session.apiDocsContent) setApiDocsContent(session.apiDocsContent);
-    if (session.promptsContent) setPromptsContent(session.promptsContent);
-    if (session.manualPrdInput) setManualPrdInput(session.manualPrdInput);
-    if (session.manualApiDocsInput) setManualApiDocsInput(session.manualApiDocsInput);
-    if (session.ragHits) setRagHits(session.ragHits);
-    if (session.pendingApiDocsPrd) setPendingApiDocsPrd(session.pendingApiDocsPrd);
-    if (typeof session.showJsonPreview === 'boolean') setShowJsonPreview(session.showJsonPreview);
-    if (session.prdReviewResult !== undefined) setPrdReviewResult(session.prdReviewResult);
-  }, []);
-
-  useEffect(() => {
-    saveV2Session({
-      viewState,
-      entryMode,
-      formData,
-      requirementsSummary,
-      pendingSummary,
-      messages,
-      conversationId,
-      prdContent,
-      apiDocsContent,
-      promptsContent,
-      manualPrdInput,
-      manualApiDocsInput,
-      ragHits,
-      pendingApiDocsPrd,
-      showJsonPreview,
-      prdReviewResult,
-    });
-  }, [
+  const buildSessionSnapshot = useCallback((): V2SessionData => ({
+    viewState,
+    entryMode,
+    formData,
+    requirementsSummary,
+    pendingSummary,
+    messages,
+    conversationId,
+    prdContent,
+    apiDocsContent,
+    promptsContent,
+    manualPrdInput,
+    manualApiDocsInput,
+    ragHits,
+    pendingApiDocsPrd,
+    showJsonPreview,
+    prdReviewResult,
+  }), [
     viewState,
     entryMode,
     formData,
@@ -596,6 +655,86 @@ export default function AppV2() {
     showJsonPreview,
     prdReviewResult,
   ]);
+
+  const applySessionSetters = useMemo(
+    () => ({
+      setViewState,
+      setEntryMode,
+      setFormData,
+      setRequirementsSummary,
+      setPendingSummary,
+      setMessages,
+      setConversationId,
+      setPrdContent,
+      setApiDocsContent,
+      setPromptsContent,
+      setManualPrdInput,
+      setManualApiDocsInput,
+      setRagHits,
+      setPendingApiDocsPrd,
+      setShowJsonPreview,
+      setPrdReviewResult,
+    }),
+    []
+  );
+
+  useEffect(() => {
+    if (!routeId) {
+      setSessionId(undefined);
+      setSessionLoadState('idle');
+      return;
+    }
+
+    if (consumeSkipNextSessionLoad()) {
+      setSessionId(routeId);
+      setSessionLoadState('ready');
+      return;
+    }
+
+    let cancelled = false;
+    setSessionLoadState('loading');
+    void loadSession(routeId).then((result) => {
+      if (cancelled) return;
+      if (result.status === 'ok') {
+        applySessionData(result.data.session_data, applySessionSetters);
+        setSessionId(routeId);
+        setSessionLoadState('ready');
+        return;
+      }
+      setSessionId(undefined);
+      setSessionLoadState(result.status === 'not_found' ? 'not_found' : 'error');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeId, applySessionSetters]);
+
+  useEffect(() => {
+    if (!sessionId || sessionLoadState !== 'ready') return;
+    debouncedSaveSession(buildSessionSnapshot(), sessionId);
+  }, [sessionId, sessionLoadState, buildSessionSnapshot]);
+
+  const ensureSessionCreated = useCallback(async (): Promise<string | null> => {
+    if (sessionId) return sessionId;
+    if (isSavingSession) return null;
+    setIsSavingSession(true);
+    const result = await saveSession(buildSessionSnapshot());
+    setIsSavingSession(false);
+    if (!result) {
+      setError('保存方案失败，请稍后重试');
+      return null;
+    }
+    markSkipNextSessionLoad();
+    setSessionId(result.id);
+    navigate(`/v2/${result.id}`, { replace: true });
+    return result.id;
+  }, [sessionId, isSavingSession, buildSessionSnapshot, navigate]);
+
+  const goToSessionList = useCallback(async () => {
+    await flushPendingSave();
+    navigate('/v2/list');
+  }, [navigate]);
 
   const requirementsPreview = useMemo(
     () => JSON.stringify(buildRequirementsSummary(formData), null, 2),
@@ -623,19 +762,25 @@ export default function AppV2() {
       'document',
     [formData.product_name, requirementsSummary?.product_name]
   );
+  const hasClarification = useMemo(() => hasClarificationContent(messages), [messages]);
   const stageItems = useMemo(
     () => [
       { index: 0, label: '结构化需求', enabled: entryMode === 'structured' || currentStageIndex >= 0, onClick: () => setViewState('form') },
-      { index: 1, label: '澄清对话', enabled: messages.length > 0 || viewState === 'chatting', onClick: () => messages.length > 0 && setViewState('chatting') },
+      {
+        index: 1,
+        label: '澄清对话',
+        enabled: hasClarification || (viewState === 'chatting' && isStreaming),
+        onClick: () => hasClarification && setViewState('chatting'),
+      },
       { index: 2, label: 'PRD', enabled: !!prdContent || viewState === 'review-prd', onClick: () => prdContent && setViewState('review-prd') },
       { index: 3, label: '接口文档', enabled: !!apiDocsContent || viewState === 'review-api-docs', onClick: () => apiDocsContent && setViewState('review-api-docs') },
       { index: 4, label: '提示词', enabled: !!promptsContent || viewState === 'review-prompts' || entryMode === 'prompts', onClick: () => promptsContent && setViewState('review-prompts') },
     ],
-    [entryMode, currentStageIndex, messages.length, viewState, prdContent, apiDocsContent, promptsContent]
+    [entryMode, currentStageIndex, hasClarification, isStreaming, viewState, prdContent, apiDocsContent, promptsContent]
   );
 
   const displayMessages = useMemo(() => {
-    const visible = messages.filter((m) => m.role !== 'system').slice(1);
+    const visible = getVisibleClarificationMessages(messages);
     if (streamingContent && viewState === 'chatting' && isStreaming) {
       return [...visible, { role: 'ai' as const, content: streamingContent }];
     }
@@ -681,6 +826,9 @@ export default function AppV2() {
       return;
     }
     setError('');
+
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
 
     const summary = buildRequirementsSummary(formData);
     setRequirementsSummary(summary);
@@ -769,6 +917,9 @@ export default function AppV2() {
       setError('缺少 PRD 内容，无法生成接口文档');
       return;
     }
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+
     setError('');
     setRagHits([]);
     setPendingApiDocsPrd('');
@@ -834,6 +985,9 @@ export default function AppV2() {
       setError('缺少 PRD 内容，无法生成提示词');
       return;
     }
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+
     setError('');
     setPromptsContent('');
     setStreamingContent('');
@@ -861,6 +1015,9 @@ export default function AppV2() {
       setError('缺少结构化需求摘要，请先返回表单页重新开始');
       return;
     }
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+
     setError('');
     setPrdContent('');
     setPrdReviewResult(null);
@@ -876,6 +1033,7 @@ export default function AppV2() {
         (chunk) => {
           accumulated += chunk;
           setStreamingContent(accumulated);
+          setPrdContent(accumulated);
         },
         {
           onPhase: (phase) => {
@@ -883,12 +1041,14 @@ export default function AppV2() {
               accumulated = '';
               setPrdGenerationStage('writing');
               setStreamingContent('');
+              setPrdContent('');
             } else if (phase === 'review_started') {
               setPrdGenerationStage('reviewing');
             } else if (phase === 'rewrite_started') {
               accumulated = '';
               setPrdGenerationStage('rewriting');
               setStreamingContent('');
+              setPrdContent('');
             }
           },
           onReview: (review) => {
@@ -942,8 +1102,10 @@ export default function AppV2() {
     }
   };
 
-  const resetPage = () => {
+  const resetPage = async () => {
+    await flushPendingSave();
     setViewState('form');
+    setEntryMode('structured');
     setFormData(DEFAULT_FORM);
     setRequirementsSummary(null);
     setPendingSummary(null);
@@ -962,7 +1124,9 @@ export default function AppV2() {
     setIsRetrievingRag(false);
     setError('');
     setFormErrors({});
-    localStorage.removeItem(V2_SESSION_KEY);
+    setShowJsonPreview(false);
+    setSessionId(undefined);
+    navigate('/v2');
   };
 
   const goBackFromReviewPrd = () => {
@@ -1003,11 +1167,83 @@ export default function AppV2() {
     viewState === 'chatting' &&
     (isSyncingSummary || (!!pendingSummary && summaryDiff.length > 0));
 
+  const enterPrdReviewFromInput = async () => {
+    if (!manualPrdInput.trim()) {
+      setError('请先填写 PRD 内容');
+      return;
+    }
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+    setError('');
+    setPrdContent(manualPrdInput);
+    setViewState('review-prd');
+  };
+
+  const enterPromptsStageFromInput = async () => {
+    if (!manualPrdInput.trim()) {
+      setError('请先填写 PRD 内容');
+      return;
+    }
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+    setError('');
+    setPrdContent(manualPrdInput);
+    setApiDocsContent(manualApiDocsInput);
+    if (manualApiDocsInput.trim()) {
+      setViewState('review-api-docs');
+    } else {
+      setViewState('review-prd');
+    }
+  };
+
+  const startApiDocsFromPrdInput = async () => {
+    setPrdContent(manualPrdInput);
+    await retrieveRagBeforeApiDocs(manualPrdInput);
+  };
+
+  const startPromptsFromInput = async () => {
+    setPrdContent(manualPrdInput);
+    setApiDocsContent(manualApiDocsInput);
+    await generatePrompts(manualPrdInput, manualApiDocsInput);
+  };
+
+  const actionLocked = isSavingSession;
+
   const cancelApiDocsRagGate = () => {
     setRagHits([]);
     setPendingApiDocsPrd('');
     setIsRetrievingRag(false);
   };
+
+  if (routeId && sessionLoadState === 'loading') {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+        加载方案中…
+      </div>
+    );
+  }
+
+  if (routeId && sessionLoadState === 'not_found') {
+    return (
+      <SessionLoadErrorPage
+        title="方案不存在"
+        description="该方案可能已被删除，或链接无效。"
+        onGoList={() => navigate('/v2/list')}
+        onGoNew={() => navigate('/v2')}
+      />
+    );
+  }
+
+  if (routeId && sessionLoadState === 'error') {
+    return (
+      <SessionLoadErrorPage
+        title="方案加载失败"
+        description="暂时无法从服务端读取该方案，请稍后重试。"
+        onGoList={() => navigate('/v2/list')}
+        onGoNew={() => navigate('/v2')}
+      />
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
@@ -1025,7 +1261,14 @@ export default function AppV2() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={resetPage}
+              onClick={() => void goToSessionList()}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              我的方案
+            </button>
+            <button
+              type="button"
+              onClick={() => void resetPage()}
               title="清空本次任务的全部进度与内容"
               className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:border-red-300 hover:bg-red-100"
             >
@@ -1242,7 +1485,7 @@ export default function AppV2() {
                     </span>
                     <button
                       type="button"
-                      onClick={resetPage}
+                      onClick={() => void resetPage()}
                       title="将清空整次任务的全部内容与进度"
                       className="rounded-md px-2 py-1 text-sm font-medium text-amber-800 hover:bg-amber-50"
                     >
@@ -1426,7 +1669,8 @@ export default function AppV2() {
             <button
               type="button"
               onClick={startStructuredConversation}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-800"
+              disabled={actionLocked}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 disabled:opacity-50"
             >
               <MessageSquare className="h-4 w-4" />
               开始澄清对话
@@ -1443,25 +1687,16 @@ export default function AppV2() {
               </div>
               <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-5">
                 <button
-                  onClick={() => {
-                    if (!manualPrdInput.trim()) {
-                      setError('请先填写 PRD 内容');
-                      return;
-                    }
-                    setError('');
-                    setPrdContent(manualPrdInput);
-                    setViewState('review-prd');
-                  }}
-                  className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  onClick={() => void enterPrdReviewFromInput()}
+                  disabled={actionLocked}
+                  className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   进入 PRD 环节
                 </button>
                 <button
-                  onClick={() => {
-                    setPrdContent(manualPrdInput);
-                    void retrieveRagBeforeApiDocs(manualPrdInput);
-                  }}
-                  className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white hover:bg-slate-800"
+                  onClick={() => void startApiDocsFromPrdInput()}
+                  disabled={actionLocked}
+                  className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                 >
                   直接生成接口文档
                 </button>
@@ -1481,31 +1716,16 @@ export default function AppV2() {
               </div>
               <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-5">
                 <button
-                  onClick={() => {
-                    if (!manualPrdInput.trim()) {
-                      setError('请先填写 PRD 内容');
-                      return;
-                    }
-                    setError('');
-                    setPrdContent(manualPrdInput);
-                    setApiDocsContent(manualApiDocsInput);
-                    if (manualApiDocsInput.trim()) {
-                      setViewState('review-api-docs');
-                    } else {
-                      setViewState('review-prd');
-                    }
-                  }}
-                  className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  onClick={() => void enterPromptsStageFromInput()}
+                  disabled={actionLocked}
+                  className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   进入当前环节
                 </button>
                 <button
-                  onClick={() => {
-                    setPrdContent(manualPrdInput);
-                    setApiDocsContent(manualApiDocsInput);
-                    void generatePrompts(manualPrdInput, manualApiDocsInput);
-                  }}
-                  className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white hover:bg-slate-800"
+                  onClick={() => void startPromptsFromInput()}
+                  disabled={actionLocked}
+                  className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                 >
                   直接生成提示词
                 </button>
@@ -1534,7 +1754,7 @@ export default function AppV2() {
                 </button>
                 <button
                   type="button"
-                  onClick={resetPage}
+                  onClick={() => void resetPage()}
                   className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
                 >
                   结束任务
@@ -1542,7 +1762,7 @@ export default function AppV2() {
                 <button
                   type="button"
                   onClick={syncSummaryBackToForm}
-                  disabled={isStreaming || isSyncingSummary}
+                  disabled={isStreaming || isSyncingSummary || actionLocked}
                   className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                 >
                   {isSyncingSummary ? '分析对话中…' : '生成 PRD'}
@@ -1603,7 +1823,7 @@ export default function AppV2() {
                 {
                   label: '结束任务',
                   variant: 'ghost',
-                  onClick: resetPage,
+                  onClick: () => void resetPage(),
                   disabled: isOptimizingDocument,
                 },
                 {
@@ -1654,7 +1874,7 @@ export default function AppV2() {
                 {
                   label: '结束任务',
                   variant: 'ghost',
-                  onClick: resetPage,
+                  onClick: () => void resetPage(),
                   disabled: isOptimizingDocument,
                 },
                 {
@@ -1701,7 +1921,7 @@ export default function AppV2() {
                 {
                   label: '结束任务',
                   variant: 'ghost',
-                  onClick: resetPage,
+                  onClick: () => void resetPage(),
                   disabled: isOptimizingDocument,
                 },
               ]}

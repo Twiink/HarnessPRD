@@ -3,12 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from api.conversation import router as conversation_router
 from api.config import router as config_router
+from api.session import router as session_router
+from db.database import init_db
 
 app = FastAPI(
     title="Vibe Coding API",
     description="对话式需求收集平台 API",
     version="1.0.0"
 )
+
+init_db()
 
 # CORS 配置
 app.add_middleware(
@@ -22,6 +26,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(conversation_router)
 app.include_router(config_router)
+app.include_router(session_router)
 
 
 @app.get("/")
