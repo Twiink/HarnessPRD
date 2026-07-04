@@ -41,7 +41,24 @@ CLARIFICATION_SYSTEM_PROMPT = """你是一位资深产品经理，正在帮助�
 1. 不要生成 PRD
 2. 不要输出完整文档、完整模板、接口文档或大段结构化产物
 3. 不要说“我来为你生成 PRD”或直接进入文档撰写
-4. 在信息已经足够时，只需明确提示用户“如果没有更多补充，可以结束澄清”
+4. 在信息已经足够时，明确提示用户「如果没有更多补充，可以点击生成 PRD」，且 **不要再提出新的待确认问题**
+
+输出格式（必须遵守）：
+1. 先输出给用户看的自然语言澄清内容（中文）
+2. 末尾单独附一段结构化状态，用以下格式包裹（界面会自动隐藏此块，用户看不到）：
+
+```clarification_state
+{
+  "open_questions": ["仍需用户确认的问题，无则填空数组"],
+  "ready_to_generate": false
+}
+```
+
+结构化状态规则：
+- open_questions：当前仍待用户回答的 0-3 个问题，每项一句；若已收口则为 []
+- ready_to_generate：仅当 open_questions 为空且信息已足够时为 true
+- 两者必须一致：有 open_questions 时 ready_to_generate 必须为 false
+- JSON 必须合法，不要加注释，不要省略字段
 
 回答风格：
 - 直接
@@ -289,3 +306,51 @@ OPTIMIZE_DOCUMENT_PROMPT_TEMPLATE = """你是一位专业的技术写作和产�
 1. 保持原有的 Markdown 格式和结构（除非用户要求更改结构）
 2. 只修改用户指令涉及的部分，其余内容保持不变
 3. 直接输出文档全文，不要添加"以下是优化后的文档"等前缀说明"""
+
+
+def get_api_docs_review_prompt(prd_content: str, api_docs_content: str) -> str:
+    return f"""你是 API 文档质量审查专家。请对照 PRD 检查 API 文档是否覆盖关键接口、字段与错误码，并给出结构化审查结果。
+
+**PRD 内容**：
+{prd_content}
+
+**API 文档内容**：
+{api_docs_content}
+
+请严格输出 JSON（不要 markdown 代码块），格式如下：
+{{
+  "passed": true,
+  "summary": "一句话总结",
+  "issues": [
+    {{
+      "severity": "high|medium|low",
+      "section": "章节或接口名",
+      "problem": "问题描述",
+      "suggestion": "修改建议"
+    }}
+  ]
+}}"""
+
+
+def get_prompts_review_prompt(prd_content: str, prompts_content: str) -> str:
+    return f"""你是提示词工程审查专家。请对照 PRD 检查提示词文档是否覆盖关键场景、约束与输出格式，并给出结构化审查结果。
+
+**PRD 内容**：
+{prd_content}
+
+**提示词文档内容**：
+{prompts_content}
+
+请严格输出 JSON（不要 markdown 代码块），格式如下：
+{{
+  "passed": true,
+  "summary": "一句话总结",
+  "issues": [
+    {{
+      "severity": "high|medium|low",
+      "section": "章节或场景",
+      "problem": "问题描述",
+      "suggestion": "修改建议"
+    }}
+  ]
+}}"""

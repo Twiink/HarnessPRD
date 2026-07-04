@@ -7,7 +7,8 @@ from typing import Any, Dict, List
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from services.conversation_service import _build_lc_messages
-from services.llm_factory import get_llm
+from services.llm_factory import get_tracked_llm
+from services.llm_metrics import LlmStep
 from services.prompts import PRD_REVIEW_PROMPT_TEMPLATE, PRD_REVIEWER_SYSTEM_PROMPT
 
 
@@ -86,7 +87,7 @@ class PrdReviewAgent:
         prd_draft: str,
         review_context: str = "",
     ) -> Dict[str, Any]:
-        llm = get_llm(temperature=0)
+        llm = get_tracked_llm(LlmStep.PRD_REVIEW.value, temperature=0)
         lc_messages = [SystemMessage(content=PRD_REVIEWER_SYSTEM_PROMPT)]
         lc_messages.extend(_build_lc_messages(conversation_messages))
         lc_messages.append(
@@ -109,7 +110,8 @@ class PrdReviewAgent:
                 ),
                 HumanMessage(content=_build_review_repair_prompt(raw_content)),
             ]
-            repair_response = await llm.ainvoke(repair_messages)
+            repair_llm = get_tracked_llm(LlmStep.JSON_REPAIR.value, temperature=0)
+            repair_response = await repair_llm.ainvoke(repair_messages)
             repaired_content = str(repair_response.content).strip()
             try:
                 review_result = _extract_json_object(repaired_content)
@@ -123,7 +125,8 @@ class PrdReviewAgent:
                         )
                     ),
                 ]
-                regenerate_response = await llm.ainvoke(regenerate_messages)
+                regenerate_llm = get_tracked_llm(LlmStep.JSON_REGENERATE.value, temperature=0)
+                regenerate_response = await regenerate_llm.ainvoke(regenerate_messages)
                 regenerated_content = str(regenerate_response.content).strip()
                 review_result = _extract_json_object(regenerated_content)
         review_result.setdefault("passed", False)

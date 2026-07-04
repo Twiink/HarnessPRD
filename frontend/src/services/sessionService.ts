@@ -1,4 +1,7 @@
-import type { Message, PrdReviewResult, RagHit } from '../types';
+import type { Message, PrdReviewResult } from '../types';
+import type { StructuredFormData } from '../types/structuredForm';
+
+export type { StructuredFormData } from '../types/structuredForm';
 
 export type V2ViewState =
   | 'form'
@@ -11,6 +14,8 @@ export type V2ViewState =
   | 'review-prompts';
 
 export type EntryMode = 'structured' | 'prd' | 'prompts';
+
+export type FormSubView = 'chooser' | 'structured' | 'import-prd' | 'import-prompts';
 
 export type RequirementsSummary = {
   product_name: string;
@@ -50,33 +55,10 @@ export type RequirementsSummary = {
   out_of_scope?: string[];
 };
 
-export type StructuredFormData = {
-  product_name: string;
-  product_goal: string;
-  target_users: string;
-  platform: string;
-  mvp_features: string;
-  v2_features: string;
-  ui_pages: string;
-  interaction_notes: string;
-  design_theme: string;
-  responsive: string;
-  auth: string;
-  database: string;
-  frontend: string;
-  backend: string;
-  deployment: string;
-  llm_usage: string;
-  security_requirements: string;
-  performance_requirements: string;
-  usability_requirements: string;
-  in_scope: string;
-  out_of_scope: string;
-};
-
 export type V2SessionData = {
   viewState?: V2ViewState;
   entryMode?: EntryMode;
+  formSubView?: FormSubView;
   formData?: StructuredFormData;
   requirementsSummary?: RequirementsSummary | null;
   pendingSummary?: RequirementsSummary | null;
@@ -87,10 +69,13 @@ export type V2SessionData = {
   promptsContent?: string;
   manualPrdInput?: string;
   manualApiDocsInput?: string;
-  ragHits?: RagHit[];
-  pendingApiDocsPrd?: string;
-  showJsonPreview?: boolean;
   prdReviewResult?: PrdReviewResult | null;
+  activeJobId?: string | null;
+  prdBaselineConfirmed?: boolean;
+  prdBaselineConfirmedAt?: string | null;
+  prdBaselineVersionId?: string | null;
+  prdBaselineVersionNo?: number | null;
+  prdBaselineContentHash?: string | null;
 };
 
 export type SessionSummary = {
@@ -186,6 +171,36 @@ export function debouncedSaveSession(data: V2SessionData, id?: string, delay = 1
       void saveSession(payload.data, payload.id);
     }
   }, delay);
+}
+
+export async function exportDeliveryPackage(sessionId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/${sessionId}/export-delivery`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '导出失败' }));
+    throw new Error(typeof err.detail === 'string' ? err.detail : '导出失败');
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const filename = parseContentDispositionFilename(disposition) || 'delivery.zip';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function parseContentDispositionFilename(disposition: string): string | null {
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      // fall through to filename=
+    }
+  }
+  const match = disposition.match(/filename="([^"]+)"/);
+  return match?.[1] ?? null;
 }
 
 export async function flushPendingSave(): Promise<void> {

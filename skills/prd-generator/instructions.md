@@ -1,91 +1,91 @@
-# PRD Generator
+# PRD 生成规范
 
-Use this skill when the task is to turn a concise product requirements summary into a stable PRD in Markdown.
+当任务是将结构化需求摘要转为稳定的 Markdown PRD 时，使用本 skill。
 
-## Input Contract
+## 输入约定
 
-- Read JSON input that follows `references/field-schema.json`.
-- Treat the input as the source of truth.
-- If an important field is missing, write `待确认` instead of guessing.
+- 读取符合 `references/field-schema.json` 的 JSON 输入。
+- 以输入内容为唯一事实来源。
+- 重要字段缺失时写「待确认」，不要猜测。
 
-## Output Contract
+## 输出约定
 
-- Output Markdown only.
-- Follow the section order and headings from `references/prd-template.md`.
-- Keep the writing concise, execution-oriented, and structured.
-- Avoid filler, repeated restatements, and decorative language.
+- 仅输出 Markdown。
+- 章节顺序与标题遵循 `references/prd-template.md`。
+- 行文简洁、面向工程落地、结构清晰。
+- 避免空话、重复表述和装饰性语言。
 
-## Workflow
+## 工作流程
 
-### 1. Validate input
+### 1. 校验输入
 
-- Confirm required fields exist and are non-empty.
-- Normalize arrays, booleans, and short enums into readable Chinese.
-- Ignore unknown fields unless they add implementation value.
+- 确认必填字段存在且非空。
+- 将数组、布尔值、短枚举转为可读中文。
+- 忽略无实现价值的未知字段。
 
-### 2. Normalize requirements
+### 2. 归一化需求
 
-- Merge semantically duplicate statements.
-- Separate confirmed facts from suggestions.
-- Convert verbose feature descriptions into atomic feature items.
-- Group details into:
-  - product overview
-  - MVP features
-  - future features
-  - page and interaction design
-  - technical constraints
-  - non-functional requirements
-  - scope boundaries
+- 合并语义重复的表述。
+- 区分已确认事实与建议性内容。
+- 将冗长功能描述拆为原子功能项。
+- 将细节归入以下分组：
+  - 产品概述
+  - MVP 功能
+  - 后续功能
+  - 页面与交互设计
+  - 技术约束
+  - 非功能需求
+  - 范围边界
 
-### 3. Render each PRD section
+### 3. 渲染各 PRD 章节
 
 #### 1. 产品概述
 
-- Fill product name, core problem, target users, and platform.
-- Use one sentence for the core problem.
+- 填写产品名称、核心问题、目标用户、平台。
+- 核心问题用一句话概括。
 
 #### 2. 功能需求
 
-- Render MVP features as a table with:
+- MVP 功能渲染为表格，列包括：
   - 功能名称
   - 功能描述
   - 用户价值
-- Keep each row atomic enough to support later API or task decomposition.
-- Put future features in a flat bullet list.
+- 每行粒度应足够支撑后续 API 或任务拆分。
+- 后续功能用扁平 bullet 列表呈现。
 
 #### 3. 页面设计
 
-- Describe only the pages, major modules, and key interactions needed for implementation.
-- Keep visual style guidance brief unless the design language directly affects implementation.
+- 仅描述实现所需的页面、主要模块与关键交互。
+- 视觉风格说明保持简短，除非设计语言直接影响实现。
 
 #### 4. 技术规格
 
-- Separate confirmed technical constraints from suggested implementation choices in wording.
-- Examples:
-  - Confirmed: “无需用户认证”
-  - Suggested: “前端可采用 React 实现”
+- 用词上区分已确认的技术约束与建议性实现选择。
+- 示例：
+  - 已确认：「无需用户认证」
+  - 建议性：「前端可采用 React 实现」
 
 #### 5. 非功能需求
 
-- Keep only actionable constraints such as performance, security, usability, compatibility, and rate limits.
+- 仅保留可执行的约束，如性能、安全、可用性、兼容性与限流等。
 
 #### 6. 项目范围
 
-- Ensure “在范围内” and “不在范围内（本期）” do not overlap.
-- Prefer concrete deliverables over vague statements.
+- 确保「在范围内」与「不在范围内（本期）」不重叠。
+- 优先写具体交付物，避免空泛表述。
 
-## Writing Rules
+## 写作规则
 
-- Default to short paragraphs, bullets, and tables.
-- Do not repeat the same fact across multiple sections unless it is required for clarity.
-- Do not turn UI decoration into long prose.
-- Do not invent backend, data model, or API details unless they are explicitly provided.
-- If the input implies a likely implementation choice but does not confirm it, label it as a suggestion.
-- When a field is unknown and important, write `待确认`.
+- 默认使用短段落、列表与表格。
+- 除非为清晰起见，不要在多个章节重复同一事实。
+- 不要把 UI 装饰性描述写成大段散文。
+- 不要编造后端、数据模型或 API 细节，除非输入中已明确提供。
+- 输入暗示某实现选择但未确认时，标注为建议性内容。
+- 字段未知且重要时，写「待确认」。
 
-## Final Checks
+## 终检
 
-- The PRD is complete and directly usable by product, design, and engineering.
-- MVP features are represented in a table, not long paragraphs.
-- The document is shorter and clearer than the raw input while preserving key decisions.
-- No section contains obvious redundancy.
+- PRD 完整，产品、设计、研发可直接使用。
+- MVP 功能以表格呈现，而非长段落。
+- 文档比原始输入更短、更清晰，同时保留关键决策。
+- 各章节无明显冗余。

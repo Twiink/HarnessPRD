@@ -4,8 +4,11 @@ from typing import List, Dict, Any, Optional, AsyncGenerator
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
-from services.llm_factory import get_llm
+from services.llm_factory import get_tracked_llm
+from services.llm_metrics import LlmStep
+from services.token_estimator import get_last_budget_check
 from services.prompts import SYSTEM_PROMPT
+from services.clarification_response import parse_clarification_response
 
 
 def format_form_data(form_data: Dict[str, Any]) -> str:
@@ -34,7 +37,7 @@ def format_form_data(form_data: Dict[str, Any]) -> str:
     return "\n".join(lines) if lines else "（用户未填写任何信息）"
 
 
-def _build_lc_messages(messages: List[Dict[str, str]]):
+def _build_lc_messages(messages: List[Dict[str, Any]]):
     """将前端消息列表转换为 LangChain 消息对象"""
     result = []
     for msg in messages:
@@ -49,8 +52,29 @@ def _build_lc_messages(messages: List[Dict[str, str]]):
     return result
 
 
-def _serialize_messages(lc_messages) -> List[Dict[str, str]]:
-    return [{"role": msg.type, "content": msg.content} for msg in lc_messages]
+def _serialize_messages(
+    lc_messages,
+    last_clarification_meta: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    serialized: List[Dict[str, Any]] = []
+    for msg in lc_messages:
+        role = msg.type
+        if role == "human":
+            role = "human"
+        elif role == "ai":
+            role = "ai"
+        serialized.append({"role": role, "content": msg.content})
+
+    if last_clarification_meta and serialized:
+        last = serialized[-1]
+        if last.get("role") in ("assistant", "ai"):
+            last["clarification_meta"] = last_clarification_meta
+
+    return serialized
+
+
+def _finalize_ai_response(full_content: str) -> tuple[str, Optional[Dict[str, Any]]]:
+    return parse_clarification_response(full_content)
 
 
 class ConversationService:
@@ -85,7 +109,7 @@ class ConversationService:
         form_data: Optional[Dict[str, Any]] = None,
         system_prompt_override: Optional[str] = None,
     ) -> AsyncGenerator[Dict, None]:
-        llm = get_llm()
+        llm = get_tracked_llm(LlmStep.CHAT_START.value)
         lc_messages = self._build_initial_messages(
             user_initial_input,
             form_data,
@@ -98,21 +122,26 @@ class ConversationService:
                 full_content += chunk.content
                 yield {"type": "chunk", "content": chunk.content}
 
-        lc_messages.append(AIMessage(content=full_content))
+        display_content, clarification_meta = _finalize_ai_response(full_content)
+        lc_messages.append(AIMessage(content=display_content))
         conv_id = "conv_" + str(abs(hash(full_content)))[:8]
-        yield {
+        done_event: Dict[str, Any] = {
             "type": "done",
             "conversation_id": conv_id,
-            "messages": _serialize_messages(lc_messages),
+            "messages": _serialize_messages(lc_messages, clarification_meta),
         }
+        budget_check = get_last_budget_check()
+        if budget_check is not None:
+            done_event["context_usage"] = budget_check.to_context_usage()
+        yield done_event
 
     async def continue_conversation_stream(
         self,
         conversation_id: str,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         user_input: str,
-    ) -> AsyncGenerator[Dict, None]:
-        llm = get_llm()
+    ) -> AsyncGenerator[Dict, Any]:
+        llm = get_tracked_llm(LlmStep.CHAT_CONTINUE.value)
         lc_messages = _build_lc_messages(messages)
         last_message = lc_messages[-1] if lc_messages else None
         if not (
@@ -127,9 +156,14 @@ class ConversationService:
                 full_content += chunk.content
                 yield {"type": "chunk", "content": chunk.content}
 
-        lc_messages.append(AIMessage(content=full_content))
-        yield {
+        display_content, clarification_meta = _finalize_ai_response(full_content)
+        lc_messages.append(AIMessage(content=display_content))
+        done_event: Dict[str, Any] = {
             "type": "done",
             "conversation_id": conversation_id,
-            "messages": _serialize_messages(lc_messages),
+            "messages": _serialize_messages(lc_messages, clarification_meta),
         }
+        budget_check = get_last_budget_check()
+        if budget_check is not None:
+            done_event["context_usage"] = budget_check.to_context_usage()
+        yield done_event

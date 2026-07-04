@@ -5,7 +5,8 @@ from typing import Any, AsyncGenerator, Dict, List
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from services.conversation_service import _build_lc_messages
-from services.llm_factory import get_llm
+from services.llm_factory import get_tracked_llm
+from services.llm_metrics import LlmStep
 from services.prompts import (
     PRD_GENERATION_PROMPT,
     PRD_REWRITE_PROMPT_TEMPLATE,
@@ -20,7 +21,7 @@ class PrdWriterAgent:
         self,
         conversation_messages: List[Dict[str, str]],
     ) -> AsyncGenerator[Dict[str, str], None]:
-        llm = get_llm(temperature=0.3)
+        llm = get_tracked_llm(LlmStep.PRD_WRITER.value, temperature=0.3)
         lc_messages = [SystemMessage(content=PRD_WRITER_SYSTEM_PROMPT)]
         lc_messages.extend(_build_lc_messages(conversation_messages))
         lc_messages.append(HumanMessage(content=PRD_GENERATION_PROMPT))
@@ -35,7 +36,7 @@ class PrdWriterAgent:
         current_draft: str,
         review_result: Dict[str, Any],
     ) -> AsyncGenerator[Dict[str, str], None]:
-        llm = get_llm(temperature=0.2)
+        llm = get_tracked_llm(LlmStep.PRD_REWRITE.value, temperature=0.2)
         lc_messages = [SystemMessage(content=PRD_WRITER_SYSTEM_PROMPT)]
         lc_messages.extend(_build_lc_messages(conversation_messages))
         lc_messages.append(

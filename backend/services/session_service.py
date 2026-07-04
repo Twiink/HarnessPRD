@@ -6,9 +6,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from db.database import get_connection, init_db
-
-init_db()
+from db.database import get_connection
+from services.document_version_service import (
+    migrate_session_documents_if_needed,
+    refresh_session_content_from_documents,
+    sync_session_content_to_documents,
+    backfill_prd_review_metadata,
+    DOC_TYPE_TO_SESSION_FIELD,
+)
 
 STAGE_LABELS: Dict[str, str] = {
     "form": "结构化需求",
@@ -26,6 +31,44 @@ ENTRY_MODE_FORM_STAGE: Dict[str, str] = {
     "prd": "PRD",
     "prompts": "提示词",
 }
+
+GENERATING_VIEW_BY_ARTIFACT: Dict[str, str] = {
+    "prd": "generating-prd",
+    "api-docs": "generating-api-docs",
+    "prompts": "generating-prompts",
+}
+
+REVIEW_VIEW_BY_ARTIFACT: Dict[str, str] = {
+    "prd": "review-prd",
+    "api-docs": "review-api-docs",
+    "prompts": "review-prompts",
+}
+
+OPTIMIZE_TO_CONTENT_ARTIFACT: Dict[str, str] = {
+    "optimize-prd": "prd",
+    "optimize-api-docs": "api-docs",
+    "optimize-prompts": "prompts",
+}
+
+
+def _is_optimize_artifact(artifact: str) -> bool:
+    return artifact.startswith("optimize-")
+
+
+def _content_artifact_from_job_artifact(artifact: str) -> str:
+    if _is_optimize_artifact(artifact):
+        return OPTIMIZE_TO_CONTENT_ARTIFACT.get(artifact, artifact.replace("optimize-", ""))
+    return artifact
+
+
+def _apply_draft_to_session_data(session_data: Dict[str, Any], artifact: str, draft: str) -> None:
+    content_artifact = _content_artifact_from_job_artifact(artifact)
+    if content_artifact == "prd":
+        session_data["prdContent"] = draft
+    elif content_artifact == "api-docs":
+        session_data["apiDocsContent"] = draft
+    elif content_artifact == "prompts":
+        session_data["promptsContent"] = draft
 
 
 def _now_iso() -> str:
@@ -64,6 +107,33 @@ def normalize_session_view_state(session_data: Dict[str, Any]) -> Dict[str, Any]
 
 
 def downgrade_generating_view_state(session_data: Dict[str, Any]) -> Dict[str, Any]:
+    active_job_id = session_data.get("activeJobId")
+    if active_job_id:
+        try:
+            from services.job_service import get_job
+
+            job = get_job(active_job_id)
+            if job["status"] == "running":
+                session_data = dict(session_data)
+                artifact = job["artifact"]
+                if _is_optimize_artifact(artifact):
+                    content_artifact = _content_artifact_from_job_artifact(artifact)
+                    session_data["viewState"] = REVIEW_VIEW_BY_ARTIFACT.get(
+                        content_artifact, session_data.get("viewState", "review-prd")
+                    )
+                else:
+                    session_data["viewState"] = GENERATING_VIEW_BY_ARTIFACT.get(
+                        artifact, session_data.get("viewState", "form")
+                    )
+                draft = (job.get("draft_content") or "").strip()
+                if draft:
+                    _apply_draft_to_session_data(session_data, artifact, draft)
+                if job.get("review"):
+                    session_data["prdReviewResult"] = job["review"]
+                return session_data
+        except KeyError:
+            pass
+
     view_state = session_data.get("viewState")
     if not view_state or not str(view_state).startswith("generating-"):
         return session_data
@@ -73,24 +143,130 @@ def downgrade_generating_view_state(session_data: Dict[str, Any]) -> Dict[str, A
     prompts = session_data.get("promptsContent") or ""
 
     fallback = {
-        "generating-prd": "review-prd" if prd_content.strip() else _fallback_before_prd(session_data),
+        "generating-prd": "review-prd",
         "generating-api-docs": (
             "review-api-docs"
             if api_docs.strip()
             else "review-prd" if prd_content.strip()
-            else _fallback_before_prd(session_data)
+            else "review-prd"
         ),
         "generating-prompts": (
             "review-prompts"
             if prompts.strip()
             else "review-api-docs" if api_docs.strip()
             else "review-prd" if prd_content.strip()
-            else _fallback_before_prd(session_data)
+            else "review-prd"
         ),
     }
     session_data = dict(session_data)
-    session_data["viewState"] = fallback.get(view_state, "form")
+    session_data["viewState"] = fallback.get(view_state, "review-prd")
     return session_data
+
+
+def load_session_data_raw(session_id: str) -> Dict[str, Any]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT session_data FROM project_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+    if not row:
+        raise KeyError(session_id)
+    return json.loads(row["session_data"])
+
+
+def sync_session_active_job(session_id: str, job_id: str, artifact: str) -> None:
+    data = load_session_data_raw(session_id)
+    data["activeJobId"] = job_id
+    data["viewState"] = GENERATING_VIEW_BY_ARTIFACT.get(artifact, data.get("viewState", "form"))
+    save_session(data, session_id)
+
+
+def sync_session_active_optimize_job(session_id: str, job_id: str) -> None:
+    data = load_session_data_raw(session_id)
+    data["activeJobId"] = job_id
+    save_session(data, session_id)
+
+
+def _clear_prd_baseline(session_data: Dict[str, Any]) -> None:
+    session_data["prdBaselineConfirmed"] = False
+    session_data["prdBaselineConfirmedAt"] = None
+    session_data["prdBaselineVersionId"] = None
+    session_data["prdBaselineVersionNo"] = None
+    session_data["prdBaselineContentHash"] = None
+
+
+def sync_session_on_optimize_complete(
+    session_id: str,
+    artifact: str,
+    draft_content: str,
+) -> None:
+    content_artifact = _content_artifact_from_job_artifact(artifact)
+    data = load_session_data_raw(session_id)
+    data["activeJobId"] = None
+    data["viewState"] = REVIEW_VIEW_BY_ARTIFACT.get(content_artifact, "review-prd")
+    _apply_draft_to_session_data(data, artifact, draft_content)
+    if artifact == "optimize-prd":
+        _clear_prd_baseline(data)
+    save_session(data, session_id)
+
+
+def sync_session_on_optimize_failed(
+    session_id: str,
+    artifact: str,
+    draft_content: str,
+) -> None:
+    content_artifact = _content_artifact_from_job_artifact(artifact)
+    data = load_session_data_raw(session_id)
+    data["activeJobId"] = None
+    data["viewState"] = REVIEW_VIEW_BY_ARTIFACT.get(content_artifact, "review-prd")
+    if draft_content.strip():
+        _apply_draft_to_session_data(data, artifact, draft_content)
+    save_session(data, session_id)
+
+
+def sync_session_on_job_complete(
+    session_id: str,
+    artifact: str,
+    draft_content: str,
+    review: Optional[Dict[str, Any]] = None,
+) -> None:
+    data = load_session_data_raw(session_id)
+    data["activeJobId"] = None
+    data["viewState"] = REVIEW_VIEW_BY_ARTIFACT.get(artifact, "review-prd")
+    if artifact == "prd":
+        data["prdContent"] = draft_content
+        if review is not None:
+            data["prdReviewResult"] = review
+        _clear_prd_baseline(data)
+    elif artifact == "api-docs":
+        data["apiDocsContent"] = draft_content
+    elif artifact == "prompts":
+        data["promptsContent"] = draft_content
+    save_session(data, session_id)
+
+
+def sync_session_mirror_for_doc_type(session_id: str, doc_type: str, content: str) -> None:
+    field = DOC_TYPE_TO_SESSION_FIELD.get(doc_type)
+    if not field:
+        return
+    data = load_session_data_raw(session_id)
+    if data.get(field) == content:
+        return
+    data[field] = content
+    save_session(data, session_id)
+
+
+def sync_session_on_job_failed(session_id: str, artifact: str, draft_content: str) -> None:
+    data = load_session_data_raw(session_id)
+    data["activeJobId"] = None
+    data["viewState"] = REVIEW_VIEW_BY_ARTIFACT.get(artifact, "review-prd")
+    if draft_content.strip():
+        if artifact == "prd":
+            data["prdContent"] = draft_content
+        elif artifact == "api-docs":
+            data["apiDocsContent"] = draft_content
+        elif artifact == "prompts":
+            data["promptsContent"] = draft_content
+    save_session(data, session_id)
 
 
 def _extract_title_from_prd(text: str) -> Optional[str]:
@@ -160,6 +336,16 @@ def get_session(session_id: str) -> Dict[str, Any]:
 
     session_data = json.loads(row["session_data"])
     session_data = normalize_session_view_state(session_data)
+    migrate_session_documents_if_needed(session_id, session_data)
+    backfill_prd_review_metadata(session_id, session_data)
+    if refresh_session_content_from_documents(session_id, session_data):
+        data_json = json.dumps(session_data, ensure_ascii=False)
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE project_sessions SET session_data = ?, updated_at = ? WHERE id = ?",
+                (data_json, _now_iso(), session_id),
+            )
+            conn.commit()
 
     return {
         "id": row["id"],
@@ -197,6 +383,10 @@ def save_session(session_data: Dict[str, Any], session_id: Optional[str] = None)
                 (entry_mode, current_stage, status, data_json, now, session_id),
             )
             conn.commit()
+        migrate_session_documents_if_needed(session_id, normalized)
+        backfill_prd_review_metadata(session_id, normalized)
+        if not normalized.get("activeJobId"):
+            sync_session_content_to_documents(session_id, normalized)
         return {"id": session_id, "title": row["title"]}
 
     new_id = str(uuid.uuid4())
@@ -211,6 +401,10 @@ def save_session(session_data: Dict[str, Any], session_id: Optional[str] = None)
             (new_id, title, entry_mode, current_stage, status, data_json, now, now),
         )
         conn.commit()
+    migrate_session_documents_if_needed(new_id, normalized)
+    backfill_prd_review_metadata(new_id, normalized)
+    if not normalized.get("activeJobId"):
+        sync_session_content_to_documents(new_id, normalized)
     return {"id": new_id, "title": title}
 
 

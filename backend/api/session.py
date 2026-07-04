@@ -1,9 +1,12 @@
 """方案持久化 API"""
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
+from services.delivery_export_service import build_delivery_zip
+from services.http_headers import build_attachment_content_disposition
 from services.session_service import (
     delete_session,
     get_session,
@@ -57,6 +60,21 @@ class OkResponse(BaseModel):
 async def api_list_sessions():
     items = list_sessions()
     return SessionListResponse(items=items)
+
+
+@router.get("/{session_id}/export-delivery")
+async def api_export_delivery(session_id: str):
+    try:
+        data, filename = build_delivery_zip(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="方案不存在")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": build_attachment_content_disposition(filename)},
+    )
 
 
 @router.get("/{session_id}", response_model=SessionDetailResponse)

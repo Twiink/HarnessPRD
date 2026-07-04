@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { Sparkles, X, Loader2, FileText, Copy, Download, Check as CheckIcon } from 'lucide-react';
-import type { DocAction, PrdReviewResult } from '../types';
+import type { DocAction, PrdReviewResult, RunSummary } from '../types';
+import type { QualityGateResult } from '../types/qualityGate';
+import GenerationStepper, { type StepItem } from './GenerationStepper';
+import RunSummaryPanel from './RunSummaryPanel';
+import ReviewResultPanel from './ReviewResultPanel';
+import QualityReportPanel from './QualityReportPanel';
+import { shouldShowReviewPanel } from '../utils/prdReviewDisplay';
 
 interface DocumentReviewProps {
   title: string;
@@ -9,13 +15,27 @@ interface DocumentReviewProps {
   isGenerating?: boolean;
   isGeneratingPhase?: boolean;
   generationStatusText?: string;
+  generationSteps?: StepItem[];
+  generationElapsed?: number;
+  generationHint?: string;
+  runSummary?: RunSummary | null;
   reviewResult?: PrdReviewResult | null;
+  /** 是否已按审查意见自动修订；优先于 runSummary.revision_applied */
+  revisionApplied?: boolean;
+  qualityGate?: QualityGateResult | null;
   /** 下载文件名，如 `朋友圈文案助手-PRD.md`；不传则根据标题自动推断 */
   downloadFilename?: string;
   actions: DocAction[];
   onSaveEdit: (content: string) => void;
   onOptimize: (instruction: string) => void;
+  versionPanel?: React.ReactNode;
+  isPreviewMode?: boolean;
+  previewLabel?: string;
+  onRestorePreview?: () => void;
+  isRestoring?: boolean;
 }
+
+export type { DocumentReviewProps };
 
 function downloadMarkdown(filename: string, content: string) {
   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
@@ -45,11 +65,22 @@ export default function DocumentReview({
   isGenerating,
   isGeneratingPhase,
   generationStatusText,
+  generationSteps,
+  generationElapsed,
+  generationHint,
+  runSummary,
   reviewResult,
+  revisionApplied,
+  qualityGate,
   downloadFilename,
   actions,
   onSaveEdit,
   onOptimize,
+  versionPanel,
+  isPreviewMode,
+  previewLabel,
+  onRestorePreview,
+  isRestoring,
 }: DocumentReviewProps) {
   const [editContent, setEditContent] = useState(content);
   const [optimizeInstruction, setOptimizeInstruction] = useState('');
@@ -71,7 +102,10 @@ export default function DocumentReview({
     ? streamingContent
     : editContent;
 
-  const isReadOnly = !!(isGenerating || isGeneratingPhase);
+  const isReadOnly = !!(isGenerating || isGeneratingPhase || isPreviewMode);
+  const showRevisionApplied = revisionApplied ?? runSummary?.revision_applied ?? false;
+  const showStepper = !!(generationSteps && generationSteps.length > 0);
+  const showHeaderLoader = (isGenerating || isGeneratingPhase) && !showStepper;
 
   const handleCopy = async () => {
     try {
@@ -87,6 +121,7 @@ export default function DocumentReview({
   };
 
   const handleTextChange = (value: string) => {
+    if (isPreviewMode) return;
     setEditContent(value);
     onSaveEdit(value);
   };
@@ -105,7 +140,7 @@ export default function DocumentReview({
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-primary-500" />
           <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
-          {(isGenerating || isGeneratingPhase) && (
+          {showHeaderLoader && (
             <span className="flex items-center gap-1 text-sm text-primary-500">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
               {isGeneratingPhase ? (generationStatusText || '生成中...') : '优化中...'}
@@ -134,59 +169,61 @@ export default function DocumentReview({
         </div>
       </div>
 
-      {/* 主体：textarea 用绝对定位填满剩余高度（避免 flex-1 在 textarea 上失效） */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-        <div className="relative min-h-[12rem] flex-1">
+      {showStepper && (
+        <GenerationStepper
+          steps={generationSteps!}
+          elapsedSeconds={generationElapsed ?? 0}
+          hint={generationHint}
+        />
+      )}
+
+      {/* 主体：文档撑满，Review 结果在下方滚动 */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {isPreviewMode && previewLabel && onRestorePreview && (
+            <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-2">
+              <p className="text-sm text-amber-800">
+                正在预览 {previewLabel}，恢复后将基于该版本创建新版本
+              </p>
+              <button
+                type="button"
+                onClick={onRestorePreview}
+                disabled={isRestoring}
+                className="flex flex-shrink-0 items-center gap-1.5 rounded-md bg-primary-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isRestoring ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                恢复此版本
+              </button>
+            </div>
+          )}
+
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
           <textarea
-            className="absolute inset-0 h-full w-full resize-none rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:bg-gray-50 disabled:text-gray-600"
+            className="min-h-[12rem] w-full flex-1 resize-none rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:bg-gray-50 disabled:text-gray-600"
             value={displayContent}
             onChange={(e) => !isReadOnly && handleTextChange(e.target.value)}
             readOnly={isReadOnly}
             spellCheck={false}
             placeholder={isGeneratingPhase ? '' : '内容将在此显示，可直接编辑...'}
           />
+          </div>
+
+          {!versionPanel && shouldShowReviewPanel(reviewResult) && (
+            <ReviewResultPanel
+              review={reviewResult!}
+              revisionApplied={showRevisionApplied}
+              className="flex-shrink-0"
+            />
+          )}
+
+          {qualityGate && (
+            <QualityReportPanel qualityGate={qualityGate} className="flex-shrink-0" />
+          )}
+
+          <RunSummaryPanel summary={runSummary ?? null} />
         </div>
 
-        {reviewResult && (
-          <div className="mt-4 flex-shrink-0 rounded-lg border border-gray-200 bg-white p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-800">Review Agent 审查结果</h3>
-                <p className="mt-1 text-sm text-gray-600">{reviewResult.summary || '已完成审查。'}</p>
-              </div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                reviewResult.passed
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-amber-100 text-amber-700'
-              }`}>
-                {reviewResult.passed ? '已通过' : '已提出修改'}
-              </span>
-            </div>
-
-            {reviewResult.issues.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {reviewResult.issues.map((issue, index) => (
-                  <div key={`${issue.section}-${index}`} className="rounded-md bg-gray-50 p-3">
-                    <div className="flex items-center gap-2 text-xs font-medium">
-                      <span className={`rounded px-2 py-0.5 ${
-                        issue.severity === 'high'
-                          ? 'bg-red-100 text-red-700'
-                          : issue.severity === 'medium'
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-slate-100 text-slate-700'
-                      }`}>
-                        {issue.severity.toUpperCase()}
-                      </span>
-                      <span className="text-gray-500">{issue.section}</span>
-                    </div>
-                    <p className="mt-2 text-sm text-gray-800">{issue.problem}</p>
-                    <p className="mt-1 text-sm text-gray-600">建议：{issue.suggestion}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {versionPanel}
       </div>
 
       {/* 底部操作区 */}
@@ -247,6 +284,8 @@ export default function DocumentReview({
                     ? 'bg-primary-600 text-white hover:bg-primary-700'
                     : action.variant === 'secondary'
                     ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : action.variant === 'link'
+                    ? 'px-2 text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline'
                     : 'text-gray-500 hover:bg-gray-50 border border-gray-200'
                 }`}
               >
