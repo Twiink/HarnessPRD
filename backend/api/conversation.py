@@ -5,7 +5,7 @@ import logging
 import os
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from api.schemas import (
     StartConversationRequest,
@@ -17,8 +17,11 @@ from api.schemas import (
     GeneratePromptsRequest,
     OptimizeDocumentRequest,
 )
+from core.request_context import get_request_id
 from services.conversation_service import ConversationService
 from services.document_service import DocumentService
+from services.llm_metrics import RunMetricsCollector, log_run_summary
+from services.token_estimator import BudgetExceededError, BudgetCheckResult
 
 router = APIRouter(prefix="/api/conversation", tags=["conversation"])
 conversation_service = ConversationService()
@@ -31,16 +34,67 @@ SSE_HEADERS = {
 }
 
 
-def _make_sse_generator(async_gen):
-    """通用 SSE 生成器包装器"""
+def _error_event(message: str) -> Dict[str, Any]:
+    return {"type": "error", "message": message, "request_id": get_request_id()}
+
+
+def _budget_exceeded_event(check: BudgetCheckResult) -> Dict[str, Any]:
+    return {
+        "type": "error",
+        "code": "TOKEN_BUDGET_EXCEEDED",
+        "message": check.message,
+        "request_id": get_request_id(),
+        "context_usage": check.to_context_usage(),
+    }
+
+
+def _make_sse_generator(async_gen, run_type: str):
+    """通用 SSE 生成器包装器 — 统一 emit run_summary"""
     async def generate():
+        run = RunMetricsCollector.start(run_type=run_type)
+        revision_applied: Optional[bool] = None
         try:
             async for event in async_gen:
+                if event.get("type") == "done" and "revision_applied" in event:
+                    revision_applied = event["revision_applied"]
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except BudgetExceededError as e:
+            run.set_budget(e.check)
+            yield f"data: {json.dumps(_budget_exceeded_event(e.check), ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.exception("SSE stream failed in conversation API")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
+            yield f"data: {json.dumps(_error_event(str(e)), ensure_ascii=False)}\n\n"
+        finally:
+            summary = run.finish(revision_applied=revision_applied)
+            summary_event = {"type": "run_summary", **summary.to_dict()}
+            yield f"data: {json.dumps(summary_event, ensure_ascii=False)}\n\n"
+            log_run_summary(summary)
+            yield "data: [DONE]\n\n"
+    return generate
+
+
+def _make_handwritten_sse_generator(service_gen, run_type: str):
+    """手写 SSE generator 包装 — start/continue-stream 等"""
+    async def generate():
+        run = RunMetricsCollector.start(run_type=run_type)
+        revision_applied: Optional[bool] = None
+        try:
+            async for event in service_gen:
+                if event.get("type") == "done" and "revision_applied" in event:
+                    revision_applied = event["revision_applied"]
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except BudgetExceededError as e:
+            run.set_budget(e.check)
+            yield f"data: {json.dumps(_budget_exceeded_event(e.check), ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.exception("SSE stream failed in conversation API")
+            yield f"data: {json.dumps(_error_event(str(e)), ensure_ascii=False)}\n\n"
+        finally:
+            summary = run.finish(revision_applied=revision_applied)
+            summary_event = {"type": "run_summary", **summary.to_dict()}
+            yield f"data: {json.dumps(summary_event, ensure_ascii=False)}\n\n"
+            log_run_summary(summary)
+            yield "data: [DONE]\n\n"
     return generate
 
 
@@ -58,35 +112,25 @@ async def get_questions() -> Dict[str, Any]:
 @router.post("/start-stream")
 async def start_conversation_stream(request: StartConversationRequest):
     """开始对话 — 流式返回"""
-    async def generate():
-        try:
-            async for event in conversation_service.start_conversation_stream(
-                request.initial_input, request.form_data, request.system_prompt_override
-            ):
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.exception("start_conversation_stream failed")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+    gen = _make_handwritten_sse_generator(
+        conversation_service.start_conversation_stream(
+            request.initial_input, request.form_data, request.system_prompt_override
+        ),
+        run_type="chat_start",
+    )
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @router.post("/continue-stream")
 async def continue_conversation_stream(request: ContinueConversationRequest):
     """继续对话 — 流式返回"""
-    async def generate():
-        try:
-            async for event in conversation_service.continue_conversation_stream(
-                request.conversation_id, request.messages, request.user_input
-            ):
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.exception("continue_conversation_stream failed")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+    gen = _make_handwritten_sse_generator(
+        conversation_service.continue_conversation_stream(
+            request.conversation_id, request.messages, request.user_input
+        ),
+        run_type="chat_continue",
+    )
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # ── 文档生成流式接口 ──────────────────────────────────────────────────────────
@@ -95,7 +139,8 @@ async def continue_conversation_stream(request: ContinueConversationRequest):
 async def generate_prd_stream(request: ConversationMessagesRequest):
     """生成 PRD — 流式返回"""
     gen = _make_sse_generator(
-        document_service.generate_prd_stream(request.conversation_messages)
+        document_service.generate_prd_stream(request.conversation_messages),
+        run_type="generate_prd",
     )
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -107,7 +152,8 @@ async def generate_prd_from_summary_stream(request: GeneratePrdFromSummaryReques
         document_service.generate_prd_from_summary_stream(
             request.requirements_summary,
             request.conversation_messages or [],
-        )
+        ),
+        run_type="generate_prd_from_summary",
     )
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -115,14 +161,33 @@ async def generate_prd_from_summary_stream(request: GeneratePrdFromSummaryReques
 @router.post("/sync-summary-from-conversation")
 async def sync_summary_from_conversation(request: SyncSummaryFromConversationRequest):
     """基于澄清对话更新结构化需求摘要"""
+    run = RunMetricsCollector.start(run_type="summary_sync")
     try:
-        return await document_service.sync_summary_from_conversation(
+        result = await document_service.sync_summary_from_conversation(
             request.requirements_summary,
             request.conversation_messages,
         )
+        summary = run.finish()
+        result["run_summary"] = summary.to_dict()
+        log_run_summary(summary)
+        return result
+    except BudgetExceededError as e:
+        run.set_budget(e.check)
+        run.finish()
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": e.check.message,
+                "context_usage": e.check.to_context_usage(),
+            },
+        ) from e
     except ValueError as e:
+        run.finish()
         logger.exception("sync_summary_from_conversation failed with validation error")
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception:
+        run.finish()
+        raise
 
 
 @router.post("/generate-api-docs-stream")
@@ -131,18 +196,10 @@ async def generate_api_docs_stream(request: GenerateApiDocsRequest):
     gen = _make_sse_generator(
         document_service.generate_api_docs_stream(
             request.prd_content, request.conversation_messages
-        )
+        ),
+        run_type="generate_api_docs",
     )
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
-
-
-@router.post("/retrieve-api-docs-rag")
-async def retrieve_api_docs_rag(request: GenerateApiDocsRequest):
-    """生成接口文档前，检索团队规范和历史接口示例"""
-    return await document_service.retrieve_api_docs_rag_hits(
-        request.prd_content,
-        request.conversation_messages,
-    )
 
 
 @router.post("/generate-prompts-stream")
@@ -151,7 +208,8 @@ async def generate_prompts_stream(request: GeneratePromptsRequest):
     gen = _make_sse_generator(
         document_service.generate_prompts_stream(
             request.prd_content, request.api_docs_content
-        )
+        ),
+        run_type="generate_prompts",
     )
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -165,6 +223,7 @@ async def optimize_document_stream(request: OptimizeDocumentRequest):
             request.current_content,
             request.instruction,
             request.context or "",
-        )
+        ),
+        run_type="optimize_document",
     )
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)

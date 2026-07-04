@@ -11,6 +11,7 @@ class UpdateConfigRequest(BaseModel):
     anthropic_api_key: Optional[str] = None
     anthropic_base_url: Optional[str] = None
     openai_api_key: Optional[str] = None
+    openai_base_url: Optional[str] = None
     default_llm_provider: Optional[str] = None
     default_llm_model: Optional[str] = None
 
@@ -33,11 +34,13 @@ async def get_llm_providers():
             },
             {
                 "id": "openai",
-                "name": "OpenAI (GPT)",
+                "name": "OpenAI 兼容（OpenAI / DeepSeek 等）",
                 "models": [
                     "gpt-4o",
                     "gpt-4o-mini",
                     "gpt-4-turbo",
+                    "deepseek-chat",
+                    "deepseek-reasoner",
                 ],
             },
         ]
@@ -51,6 +54,7 @@ async def get_current_config():
         "default_llm_provider": settings.default_llm_provider,
         "default_llm_model": settings.default_llm_model,
         "anthropic_base_url": settings.anthropic_base_url,
+        "openai_base_url": settings.openai_base_url,
         "has_anthropic_key": bool(
             settings.anthropic_api_key
             and settings.anthropic_api_key != "your_anthropic_api_key_here"
@@ -78,6 +82,10 @@ async def update_config(request: UpdateConfigRequest):
     if request.openai_api_key:
         settings.openai_api_key = request.openai_api_key
         updated_fields.append("openai_api_key")
+
+    if request.openai_base_url is not None:
+        settings.openai_base_url = request.openai_base_url
+        updated_fields.append("openai_base_url")
 
     if request.default_llm_provider:
         if request.default_llm_provider not in ["anthropic", "openai"]:

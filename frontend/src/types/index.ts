@@ -1,6 +1,12 @@
 export interface Message {
   role: 'system' | 'user' | 'human' | 'assistant' | 'ai';
   content: string;
+  clarification_meta?: ClarificationMeta;
+}
+
+export interface ClarificationMeta {
+  open_questions: string[];
+  ready_to_generate: boolean;
 }
 
 export type ViewState =
@@ -18,7 +24,7 @@ export type DocType = 'prd' | 'api-docs' | 'prompts';
 
 export interface DocAction {
   label: string;
-  variant: 'primary' | 'secondary' | 'ghost';
+  variant: 'primary' | 'secondary' | 'ghost' | 'link';
   onClick: () => void;
   disabled?: boolean;
 }
@@ -81,18 +87,11 @@ export interface GeneratePrdStreamResult {
   revision_applied: boolean;
 }
 
-export interface RagHit {
-  source: string;
-  title: string;
-  score: number;
-  content: string;
-  content_preview: string;
-}
-
 export interface ConfigResponse {
   default_llm_provider: string;
   default_llm_model: string;
   anthropic_base_url: string;
+  openai_base_url: string;
   has_anthropic_key: boolean;
   has_openai_key: boolean;
 }
@@ -102,3 +101,50 @@ export interface LLMProvider {
   name: string;
   models: string[];
 }
+
+export type RunStepSummary = {
+  step: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  duration_ms?: number;
+};
+
+export type InjectedSkillMeta = {
+  skill_id: string;
+  version: string;
+  artifacts: string[];
+};
+
+export type RunSummary = {
+  request_id: string;
+  run_type: string;
+  total_duration_ms: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  llm_call_count: number;
+  revision_applied?: boolean;
+  steps?: RunStepSummary[];
+  injected_skills?: InjectedSkillMeta[];
+  budget?: {
+    estimated_input_tokens: number;
+    budget_tokens: number;
+    ratio: number;
+    level: string;
+  };
+};
+
+export type ContextUsage = {
+  estimated_input_tokens: number;
+  budget_tokens: number;
+  ratio: number;
+  level: 'ok' | 'warn' | 'exceed';
+};
+
+/** 澄清阶段单轮 context 统计（前端按 SSE 累积） */
+export type ClarificationRoundUsage = {
+  round: number;
+  label: string;
+  usage: ContextUsage;
+  durationMs?: number;
+  outputTokens?: number;
+};

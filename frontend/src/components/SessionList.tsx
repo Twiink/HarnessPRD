@@ -10,9 +10,9 @@ import {
 const V2_PAGE_CLASS = 'mx-auto w-full max-w-6xl px-6';
 
 const ENTRY_MODE_LABELS: Record<string, string> = {
-  structured: '从零开始',
-  prd: '从 PRD 开始',
-  prompts: '从提示词开始',
+  structured: '从零创建',
+  prd: '导入 PRD',
+  prompts: '导入 PRD+接口文档',
 };
 
 function formatDateTime(value: string): string {

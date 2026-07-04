@@ -1,0 +1,18 @@
+id: prd-generator
+version: "1.0.0"
+label: PRD 生成规范
+description: 结构化需求摘要转 PRD 的模板、写作规则与字段契约
+applies_to:
+  - prd
+  - optimize-prd
+artifacts:
+  - path: instructions.md
+    role: instructions
+  - path: references/writing-rules.md
+    role: reference
+  - path: references/prd-template.md
+    role: template
+  - path: references/field-schema.json
+    role: schema
+enabled: true
+priority: 10

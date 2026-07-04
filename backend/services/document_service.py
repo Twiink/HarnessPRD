@@ -7,19 +7,21 @@ from typing import List, Dict, Any, AsyncGenerator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from services.llm_factory import get_llm
+from services.llm_factory import get_tracked_llm
+from services.llm_metrics import LlmStep
 from services.prompts import (
     PRD_GENERATION_PROMPT,
     API_DOCS_GENERATION_PROMPT,
-    PROMPTS_GENERATION_PROMPT,
     OPTIMIZE_DOCUMENT_PROMPT_TEMPLATE,
     PRD_REWRITE_PROMPT_TEMPLATE,
     PRD_WRITER_SYSTEM_PROMPT,
 )
 from services.prd_review_agent import PrdReviewAgent
+from services.api_docs_review_agent import ApiDocsReviewAgent
+from services.prompts_review_agent import PromptsReviewAgent
 from services.prd_writer_agent import PrdWriterAgent
 from services.conversation_service import _build_lc_messages
-from services.rag_service import retrieve_api_docs_context, retrieve_api_docs_hits
+from services.skill_loader import compose_prompt_sections, load_skill_bundle, read_artifact_file
 
 
 def _load_prd_template() -> str:
@@ -33,21 +35,30 @@ def _load_prd_template() -> str:
         return ""
 
 
-def _load_skill_artifact(*path_parts: str) -> str:
-    """读取平台无关 PRD skill 的参考文件，缺失时返回空字符串"""
-    artifact_path = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "..",
-        "skills",
-        "prd-generator",
-        *path_parts,
-    )
-    try:
-        with open(artifact_path, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except Exception:
+def _build_skill_section(sections: Dict[str, str], title: str = "团队规范与参考示例") -> str:
+    """将 skill sections 拼成 prompt 段落。"""
+    parts: List[str] = []
+    role_labels = {
+        "instructions": "生成说明",
+        "reference": "规范与写作要点",
+        "template": "输出模板",
+        "example": "参考示例",
+    }
+    for role in ("instructions", "reference", "template", "example"):
+        content = sections.get(role)
+        if content:
+            parts.append(f"### {role_labels.get(role, role)}\n\n{content}")
+    if not parts:
         return ""
+    return f"\n\n## {title}\n\n" + "\n\n".join(parts) + "\n\n"
+
+
+def _artifact_for_optimize(doc_type: str) -> str:
+    return {
+        "prd": "optimize-prd",
+        "api-docs": "optimize-api-docs",
+        "prompts": "optimize-prompts",
+    }.get(doc_type, "")
 
 
 def _build_prd_prompt() -> str:
@@ -60,9 +71,10 @@ def _build_prd_prompt() -> str:
 
 def _build_prd_from_summary_prompt(requirements_summary: Dict[str, Any]) -> str:
     """基于结构化需求摘要构建 PRD 生成 prompt"""
-    template = _load_skill_artifact("references", "prd-template.md") or _load_prd_template()
-    writing_rules = _load_skill_artifact("references", "writing-rules.md")
-    instructions = _load_skill_artifact("instructions.md")
+    sections = compose_prompt_sections(load_skill_bundle("prd"))
+    template = sections.get("template") or _load_prd_template()
+    writing_rules = sections.get("reference", "")
+    instructions = sections.get("instructions", "")
     summary_json = json.dumps(requirements_summary, ensure_ascii=False, indent=2)
 
     prompt_parts = [
@@ -113,7 +125,10 @@ def _build_summary_sync_prompt(
     """构建结构化摘要回填 prompt，要求输出 JSON"""
     summary_json = json.dumps(requirements_summary, ensure_ascii=False, indent=2)
     conversation_text = _format_conversation_context(conversation_messages)
-    schema_text = _load_skill_artifact("references", "field-schema.json")
+    schema_text = (
+        compose_prompt_sections(load_skill_bundle("prd")).get("schema")
+        or read_artifact_file("prd-generator", "references/field-schema.json")
+    )
 
     prompt_parts = [
         "请根据以下结构化需求摘要和后续澄清对话，输出一份更新后的结构化需求摘要 JSON。",
@@ -219,9 +234,11 @@ class DocumentService:
     def __init__(self):
         self.prd_writer = PrdWriterAgent()
         self.prd_reviewer = PrdReviewAgent()
+        self.api_docs_reviewer = ApiDocsReviewAgent()
+        self.prompts_reviewer = PromptsReviewAgent()
 
     async def generate_prd(self, conversation_messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        llm = get_llm(temperature=0.3)
+        llm = get_tracked_llm(LlmStep.PRD_WRITER.value, temperature=0.3)
         lc_messages = _build_lc_messages(conversation_messages)
         lc_messages.append(HumanMessage(content=_build_prd_prompt()))
         response = await llm.ainvoke(lc_messages)
@@ -286,7 +303,7 @@ class DocumentService:
                 review_context_parts.extend(["", "补充澄清对话：", clarification_context])
 
         yield {"type": "phase", "phase": "writer_started"}
-        llm = get_llm(temperature=0.2)
+        llm = get_tracked_llm(LlmStep.PRD_WRITER.value, temperature=0.2)
         lc_messages = [
             SystemMessage(
                 content=(
@@ -352,8 +369,9 @@ class DocumentService:
         rewrite_messages.append(HumanMessage(content=_build_prd_from_summary_prompt(requirements_summary)))
         rewrite_messages.append(HumanMessage(content=rewrite_prompt))
 
+        rewrite_llm = get_tracked_llm(LlmStep.PRD_REWRITE.value, temperature=0.2)
         draft_v2 = ""
-        async for chunk in llm.astream(rewrite_messages):
+        async for chunk in rewrite_llm.astream(rewrite_messages):
             if chunk.content:
                 draft_v2 += chunk.content
                 yield {"type": "text_delta", "phase": "rewrite", "content": chunk.content}
@@ -370,7 +388,7 @@ class DocumentService:
         requirements_summary: Dict[str, Any],
         conversation_messages: List[Dict[str, str]],
     ) -> Dict[str, Any]:
-        llm = get_llm(temperature=0)
+        llm = get_tracked_llm(LlmStep.SUMMARY_SYNC.value, temperature=0)
         lc_messages = [
             SystemMessage(
                 content=(
@@ -391,7 +409,8 @@ class DocumentService:
                 ),
                 HumanMessage(content=_build_json_repair_prompt(content)),
             ]
-            repair_response = await llm.ainvoke(repair_messages)
+            repair_llm = get_tracked_llm(LlmStep.JSON_REPAIR.value, temperature=0)
+            repair_response = await repair_llm.ainvoke(repair_messages)
             repaired_content = str(repair_response.content).strip()
             try:
                 updated_summary = _extract_json_object(repaired_content)
@@ -410,7 +429,8 @@ class DocumentService:
                         )
                     ),
                 ]
-                regenerate_response = await llm.ainvoke(regenerate_messages)
+                regenerate_llm = get_tracked_llm(LlmStep.JSON_REGENERATE.value, temperature=0)
+                regenerate_response = await regenerate_llm.ainvoke(regenerate_messages)
                 regenerated_content = str(regenerate_response.content).strip()
                 try:
                     updated_summary = _extract_json_object(regenerated_content)
@@ -423,79 +443,71 @@ class DocumentService:
                     ) from regenerate_error
         return {"requirements_summary": updated_summary, "status": "completed"}
 
-    async def retrieve_api_docs_rag_hits(
-        self,
-        prd_content: str,
-        conversation_messages: List[Dict[str, str]],
-    ) -> Dict[str, Any]:
-        query = f"{prd_content}\n\n{_format_conversation_context(conversation_messages)}"
-        hits = retrieve_api_docs_hits(query)
-        return {
-            "status": "completed",
-            "hits": [
-                {
-                    "source": hit.source,
-                    "title": hit.title,
-                    "score": hit.score,
-                    "content": hit.content,
-                    "content_preview": hit.content_preview,
-                }
-                for hit in hits
-            ],
-        }
-
     async def generate_api_docs_stream(
         self,
         prd_content: str,
         conversation_messages: List[Dict[str, str]],
     ) -> AsyncGenerator[Dict, None]:
-        llm = get_llm(temperature=0.3)
+        llm = get_tracked_llm(LlmStep.API_DOCS_GENERATE.value, temperature=0.3)
         lc_messages = _build_lc_messages(conversation_messages)
-        rag_context = retrieve_api_docs_context(
-            f"{prd_content}\n\n{_format_conversation_context(conversation_messages)}"
-        )
-        rag_section = (
-            f"\n\n接口文档生成前检索到的 RAG 参考资料：\n\n{rag_context}\n\n"
-            if rag_context
-            else "\n\n未检索到可用的 RAG 参考资料，请仅基于 PRD 和通用接口设计经验生成。\n\n"
+        sections = compose_prompt_sections(load_skill_bundle("api-docs"))
+        skill_section = _build_skill_section(sections, title="团队接口规范与参考示例")
+        conversation_text = _format_conversation_context(conversation_messages)
+        conversation_section = (
+            f"\n\n澄清对话摘要：\n\n{conversation_text}\n\n"
+            if conversation_text
+            else ""
         )
         lc_messages.append(HumanMessage(
             content=(
                 f"以下是已确认的产品需求文档（PRD）：\n\n{prd_content}"
-                f"{rag_section}"
+                f"{conversation_section}"
+                f"{skill_section}"
                 f"{API_DOCS_GENERATION_PROMPT}"
                 "\n\n额外要求："
-                "\n1. 优先遵循 RAG 中的团队接口规范。"
-                "\n2. 参考历史接口文档示例的路径命名、参数表、响应结构和错误码写法。"
-                "\n3. 如果引用了 RAG 中的规范，请把它内化为接口设计结果，不要在正文中机械堆砌原文。"
+                "\n1. 遵循 skill 中的团队接口规范。"
+                "\n2. 参考示例的路径、参数表、错误码写法。"
+                "\n3. 规范内化为设计结果，不堆砌原文。"
             )
         ))
 
+        draft = ""
         async for chunk in llm.astream(lc_messages):
             if chunk.content:
+                draft += chunk.content
                 yield {"type": "chunk", "content": chunk.content}
 
-        yield {"type": "done"}
+        yield {"type": "phase", "phase": "review_started"}
+        review_result = await self.api_docs_reviewer.review(prd_content, draft)
+        yield {"type": "review", "content": review_result}
+        yield {"type": "done", "content": draft, "review": review_result}
 
     async def generate_prompts_stream(
         self,
         prd_content: str,
         api_docs_content: str,
     ) -> AsyncGenerator[Dict, None]:
-        llm = get_llm(temperature=0.5)
+        llm = get_tracked_llm(LlmStep.PROMPTS_GENERATE.value, temperature=0.5)
+        sections = compose_prompt_sections(load_skill_bundle("prompts"))
+        skill_section = _build_skill_section(sections, title="提示词套件生成规范")
         context = f"产品需求文档（PRD）：\n\n{prd_content}"
         if api_docs_content.strip():
             context += f"\n\n接口文档：\n\n{api_docs_content}"
         lc_messages = [
             SystemMessage(content="你是一位 AI 辅助开发专家，专门为 Claude Code 等 AI 编程工具设计高质量的系统提示词。"),
-            HumanMessage(content=f"{context}\n\n{PROMPTS_GENERATION_PROMPT}"),
+            HumanMessage(content=f"{context}\n\n{skill_section}"),
         ]
 
+        draft = ""
         async for chunk in llm.astream(lc_messages):
             if chunk.content:
+                draft += chunk.content
                 yield {"type": "chunk", "content": chunk.content}
 
-        yield {"type": "done"}
+        yield {"type": "phase", "phase": "review_started"}
+        review_result = await self.prompts_reviewer.review(prd_content, draft)
+        yield {"type": "review", "content": review_result}
+        yield {"type": "done", "content": draft, "review": review_result}
 
     async def optimize_document_stream(
         self,
@@ -515,13 +527,20 @@ class DocumentService:
             if context.strip()
             else ""
         )
+        skill_section = ""
+        artifact = _artifact_for_optimize(doc_type)
+        if artifact:
+            sections = compose_prompt_sections(load_skill_bundle(artifact))
+            skill_section = _build_skill_section(sections, title="优化时需遵循的团队规范")
         prompt = OPTIMIZE_DOCUMENT_PROMPT_TEMPLATE.format(
             doc_type_label=doc_type_label,
             instruction=instruction,
             current_content=current_content,
             context_section=context_section,
         )
-        llm = get_llm(temperature=0.3)
+        if skill_section:
+            prompt = f"{prompt}\n\n{skill_section}"
+        llm = get_tracked_llm(LlmStep.DOCUMENT_OPTIMIZE.value, temperature=0.3)
         lc_messages = [HumanMessage(content=prompt)]
 
         async for chunk in llm.astream(lc_messages):
