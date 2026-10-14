@@ -29,7 +29,7 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 100
@@ -38,3 +38,12 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
 ignore = ["F401", "F841"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
+module = ["yaml", "yaml.*"]
+ignore_missing_imports = true

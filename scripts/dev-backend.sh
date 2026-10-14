@@ -9,4 +9,4 @@ if [[ ! -f "$BACKEND_DIR/.env" && -f "$BACKEND_DIR/.env.example" ]]; then
   exit 1
 fi
 
-exec uv run --project "$BACKEND_DIR" uvicorn main:app --reload --host 0.0.0.0 --port "${HARNESSPRD_BACKEND_PORT:-8001}"
+exec uv run --project "$BACKEND_DIR" uvicorn --app-dir "$BACKEND_DIR/src" apps.main:app --reload --host "${HARNESSPRD_BACKEND_HOST:-127.0.0.1}" --port "${HARNESSPRD_BACKEND_PORT:-8001}"

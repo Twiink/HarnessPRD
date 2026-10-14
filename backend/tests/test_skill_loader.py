@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from services.skill_loader import (  # noqa: E402
+from apps.services.skill_loader import (  # noqa: E402
     compose_prompt_sections,
     load_skill_bundle,
     resolve_skill_ids,
@@ -42,7 +42,7 @@ def test_empty_api_docs_binding():
 
 
 def test_invalid_skill_raises():
-    from services import skill_loader
+    from apps.services import skill_loader
 
     original = skill_loader._load_bindings_config
     skill_loader._load_bindings_config.cache_clear()
@@ -86,7 +86,7 @@ def test_prompts_bundle():
 
 
 def test_bundle_to_injected_meta():
-    from services.skill_loader import bundle_to_injected_meta
+    from apps.services.skill_loader import bundle_to_injected_meta
 
     bundle = load_skill_bundle("api-docs")
     meta = bundle_to_injected_meta(bundle)
