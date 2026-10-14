@@ -23,11 +23,10 @@
 ### 1. 后端设置
 
 ```bash
-cd backend
-pip install -r requirements.txt
-cp .env.example .env
+uv sync --project backend
+cp backend/.env.example backend/.env
 # 编辑 .env 文件，填入你的 API KEY
-uvicorn main:app --reload
+./scripts/dev-backend.sh
 ```
 
 ### 2. 前端设置
@@ -35,8 +34,17 @@ uvicorn main:app --reload
 ```bash
 cd frontend
 npm install
-npm run dev
+../scripts/dev-frontend.sh
 ```
+
+也可以从项目根目录运行 `./start.sh` 同时启动前后端。
+
+### 开发工具
+
+- 后端依赖由 `backend/pyproject.toml` 和 `backend/uv.lock` 管理；`backend/requirements.txt` 是供旧 pip/Docker 环境使用的锁定导出。修改依赖后运行 `uv export --project backend --locked --no-dev --no-hashes --format requirements.txt --output-file backend/requirements.txt` 更新它。
+- 后端质量检查：`uv run --project backend ruff check backend`；格式化：`uv run --project backend ruff format backend`；运行测试：`uv run --project backend pytest`。
+- 首次使用时运行 `sh scripts/install-git-hooks.sh` 安装仓库 Git hooks。
+- PyCharm 中可直接运行共享配置 `Backend`、`Frontend`。
 
 ## API KEY 配置
 
