@@ -6,10 +6,10 @@ import zipfile
 
 import pytest
 
-from db import database
-from services.delivery_export_service import build_delivery_zip
-from services.document_service import _build_prd_from_summary_prompt
-from services.document_version_service import (
+from apps.db import connection as database
+from apps.services.delivery_export_service import build_delivery_zip
+from apps.services.document_service import _build_prd_from_summary_prompt
+from apps.services.document_version_service import (
     checkpoint,
     get_current_version,
     get_version,
@@ -17,15 +17,8 @@ from services.document_version_service import (
     restore_version,
     update_version_note,
 )
-from services.requirements_normalization import normalize_feature_fields
-from services.session_service import get_session, save_session
-
-
-@pytest.fixture
-def isolated_database(tmp_path, monkeypatch):
-    monkeypatch.setattr(database, "DB_DIR", tmp_path)
-    monkeypatch.setattr(database, "DB_PATH", tmp_path / "sessions.db")
-    database.init_db()
+from apps.services.requirements_normalization import normalize_feature_fields
+from apps.services.session_service import get_session, save_session
 
 
 def test_merge_feature_sources_preserves_details_and_is_idempotent():
@@ -145,12 +138,15 @@ def test_document_history_restore_notes_and_delivery_remain_available(isolated_d
 
 def test_application_starts_and_serves_project_routes(isolated_database):
     from fastapi.testclient import TestClient
-    from main import app
+    from apps.main import create_app
+    from apps.core.config import Settings
+
+    app = create_app(settings=Settings(_env_file=None, database_path=isolated_database.path))
 
     with TestClient(app) as client:
         assert client.get("/health").json() == {"status": "healthy"}
         assert client.get("/").json() == {"message": "Vibe Coding API 运行中"}
-        assert "/api/session/save" in client.get("/openapi.json").json()["paths"]
+        assert "/api/sessions" in client.get("/openapi.json").json()["paths"]
         response = client.post(
             "/api/session/save",
             json={

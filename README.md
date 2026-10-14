@@ -50,11 +50,11 @@ cd ..
 ```text
 HarnessPRD/
 ├── backend/
-│   ├── api/                  # 会话、文档、生成任务与配置接口
-│   ├── core/                 # 应用配置、问题与文档模板
-│   ├── services/             # 需求澄清、生成、审查、历史与导出
-│   ├── tests/                # 后端测试
-│   └── main.py               # 后端入口
+│   ├── src/apps/        # API、业务、仓储、Agent/LLM 与任务运行时
+│   ├── config/                # 模型能力注册表
+│   ├── resources/             # Prompt、问题与文档模板
+│   ├── tests/                 # 后端测试
+│   └── main.py                # 兼容启动入口
 ├── frontend/src/
 │   ├── components/workspace/ # 工作台录入与澄清组件
 │   ├── components/           # 文档、历史、方案列表等组件
@@ -72,9 +72,11 @@ HarnessPRD/
 
 ```bash
 uv run --project backend ruff check backend
-uv run --project backend pytest
+uv run --project backend pytest -c backend/pyproject.toml backend/tests
 npm --prefix frontend run build
 ```
+
+后端架构、任务恢复与 API 说明见 [backend/README.md](backend/README.md)。
 
 后端依赖由 `backend/pyproject.toml` 和 `backend/uv.lock` 管理。`backend/requirements.txt` 是供 pip 和 Docker 环境使用的锁定导出；修改依赖后运行：
 

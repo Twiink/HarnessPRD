@@ -1,55 +1,14 @@
-import logging
+"""兼容现有 uvicorn main:app 命令；正式入口为 apps.main。"""
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from core.config import settings
-from api.jobs import router as jobs_router
-from api.conversation import router as conversation_router
-from api.config import router as config_router
-from api.session import router as session_router
-from api.documents import router as documents_router
-from db.database import init_db
-from middleware.request_id import RequestIdMiddleware
+import sys
+from pathlib import Path
 
-logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
-
-app = FastAPI(
-    title="Vibe Coding API",
-    description="对话式需求收集平台 API",
-    version="current"
-)
-
-init_db()
-
-app.add_middleware(RequestIdMiddleware)
-
-# CORS 配置
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 注册路由
-app.include_router(conversation_router)
-app.include_router(jobs_router)
-app.include_router(config_router)
-app.include_router(session_router)
-app.include_router(documents_router)
-
-
-@app.get("/")
-async def root():
-    return {"message": "Vibe Coding API 运行中"}
-
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+from apps.main import app, create_app  # noqa: E402
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=settings.host, port=settings.port)
+    from apps.core.config import get_settings
+
+    config = get_settings()
+    uvicorn.run(app, host=config.host, port=config.port)

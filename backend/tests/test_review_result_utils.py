@@ -1,4 +1,7 @@
-from services.review_result_utils import build_parse_failed_review, normalize_document_review
+from apps.services.review_result_utils import (
+    build_parse_failed_review,
+    normalize_document_review,
+)
 
 
 def test_normalize_review_fills_issue_when_failed_without_details():
@@ -17,7 +20,12 @@ def test_normalize_review_keeps_meaningful_issues_only():
             "passed": False,
             "summary": "存在遗漏",
             "issues": [
-                {"severity": "high", "section": "创建申请", "problem": "缺少错误码", "suggestion": "补充 400"},
+                {
+                    "severity": "high",
+                    "section": "创建申请",
+                    "problem": "缺少错误码",
+                    "suggestion": "补充 400",
+                },
                 {"severity": "low", "section": "", "problem": "", "suggestion": ""},
             ],
         },
