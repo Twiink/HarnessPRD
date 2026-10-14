@@ -21,7 +21,7 @@ function parseApiError(err: unknown, fallback: string): Error {
       return new Error(detail);
     }
     if (err.response?.status === 404) {
-      return new Error('方案或版本不存在');
+      return new Error('方案或历史记录不存在');
     }
     if (err.response?.status === 400) {
       return new Error(typeof detail === 'string' ? detail : '请求无效');
@@ -47,7 +47,7 @@ export async function fetchVersionList(
     const res = await apiClient.get<VersionListResponse>(`/${sessionId}/documents/${docType}/versions`);
     return res.data;
   } catch (err) {
-    throw parseApiError(err, '加载版本列表失败');
+    throw parseApiError(err, '加载历史记录失败');
   }
 }
 
@@ -62,7 +62,7 @@ export async function fetchVersionDetail(
     );
     return res.data;
   } catch (err) {
-    throw parseApiError(err, '加载版本详情失败');
+    throw parseApiError(err, '加载历史详情失败');
   }
 }
 
@@ -78,7 +78,7 @@ export async function checkpointVersion(
     );
     return res.data;
   } catch (err) {
-    throw parseApiError(err, '保存为新版本失败');
+    throw parseApiError(err, '保存快照失败');
   }
 }
 
@@ -93,7 +93,7 @@ export async function restoreVersion(
     );
     return res.data;
   } catch (err) {
-    throw parseApiError(err, '恢复此版本失败');
+    throw parseApiError(err, '恢复此记录失败');
   }
 }
 

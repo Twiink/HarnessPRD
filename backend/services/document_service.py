@@ -22,6 +22,7 @@ from services.prompts_review_agent import PromptsReviewAgent
 from services.prd_writer_agent import PrdWriterAgent
 from services.conversation_service import _build_lc_messages
 from services.skill_loader import compose_prompt_sections, load_skill_bundle, read_artifact_file
+from services.requirements_normalization import normalize_feature_fields
 
 
 def _load_prd_template() -> str:
@@ -75,7 +76,7 @@ def _build_prd_from_summary_prompt(requirements_summary: Dict[str, Any]) -> str:
     template = sections.get("template") or _load_prd_template()
     writing_rules = sections.get("reference", "")
     instructions = sections.get("instructions", "")
-    summary_json = json.dumps(requirements_summary, ensure_ascii=False, indent=2)
+    summary_json = json.dumps(normalize_feature_fields(requirements_summary), ensure_ascii=False, indent=2)
 
     prompt_parts = [
         "请基于以下结构化需求摘要生成一份专业、简洁、工程可执行的 PRD。",
@@ -83,7 +84,7 @@ def _build_prd_from_summary_prompt(requirements_summary: Dict[str, Any]) -> str:
         "1. 使用中文输出 Markdown。",
         "2. 严格遵循给定模板的章节结构。",
         "3. 不编造未提供的业务事实，缺失且重要的信息写“待确认”。",
-        "4. MVP 功能必须整理为表格，列为：功能名称、功能描述、用户价值。",
+        "4. 产品功能必须整理为表格，列为：功能名称、功能描述、用户价值。",
         "5. 技术规格中，已确认项直接写明；推测性实现建议使用“可采用/建议”表述。",
         "6. 删除重复信息，只保留对产品、设计、研发交接有用的内容。",
         "",
@@ -123,7 +124,7 @@ def _build_summary_sync_prompt(
     conversation_messages: List[Dict[str, str]],
 ) -> str:
     """构建结构化摘要回填 prompt，要求输出 JSON"""
-    summary_json = json.dumps(requirements_summary, ensure_ascii=False, indent=2)
+    summary_json = json.dumps(normalize_feature_fields(requirements_summary), ensure_ascii=False, indent=2)
     conversation_text = _format_conversation_context(conversation_messages)
     schema_text = (
         compose_prompt_sections(load_skill_bundle("prd")).get("schema")
@@ -138,7 +139,7 @@ def _build_summary_sync_prompt(
         "3. 仅在对话中出现了明确补充、修正或澄清时才更新字段。",
         "4. 不要编造信息；不确定的内容保留原值。",
         "5. 如果对话中补充了更明确的内容，应覆盖原先的“待确认”或较模糊值。",
-        "6. mvp_features、ui_pages、interaction_notes、in_scope、out_of_scope 等字段保持结构化。",
+        "6. features、ui_pages、interaction_notes、in_scope、out_of_scope 等字段保持结构化。",
         "",
         "当前结构化需求摘要：",
         summary_json,
@@ -210,7 +211,7 @@ def _build_summary_regeneration_prompt(
     requirements_summary: Dict[str, Any],
     conversation_messages: List[Dict[str, str]],
 ) -> str:
-    summary_json = json.dumps(requirements_summary, ensure_ascii=False, indent=2)
+    summary_json = json.dumps(normalize_feature_fields(requirements_summary), ensure_ascii=False, indent=2)
     conversation_text = _format_conversation_context(conversation_messages)
     return "\n".join([
         "请重新输出一份更新后的结构化需求摘要 JSON。",
@@ -248,41 +249,41 @@ class DocumentService:
         self,
         conversation_messages: List[Dict[str, str]],
     ) -> AsyncGenerator[Dict, None]:
-        draft_v1 = ""
+        initial_draft = ""
         yield {"type": "phase", "phase": "writer_started"}
 
         async for event in self.prd_writer.write_stream(conversation_messages):
             if event["type"] == "text_delta":
-                draft_v1 += event["content"]
+                initial_draft += event["content"]
             yield event
 
         yield {"type": "phase", "phase": "review_started"}
-        review_result = await self.prd_reviewer.review(conversation_messages, draft_v1)
+        review_result = await self.prd_reviewer.review(conversation_messages, initial_draft)
         yield {"type": "review", "phase": "review", "content": review_result}
 
         if review_result.get("passed", False):
             yield {
                 "type": "done",
-                "final_prd": draft_v1,
+                "final_prd": initial_draft,
                 "review": review_result,
                 "revision_applied": False,
             }
             return
 
         yield {"type": "phase", "phase": "rewrite_started"}
-        draft_v2 = ""
+        revised_draft = ""
         async for event in self.prd_writer.rewrite_stream(
             conversation_messages=conversation_messages,
-            current_draft=draft_v1,
+            current_draft=initial_draft,
             review_result=review_result,
         ):
             if event["type"] == "text_delta":
-                draft_v2 += event["content"]
+                revised_draft += event["content"]
             yield event
 
         yield {
             "type": "done",
-            "final_prd": draft_v2,
+            "final_prd": revised_draft,
             "review": review_result,
             "revision_applied": True,
         }
@@ -295,7 +296,7 @@ class DocumentService:
         clarification_context = ""
         review_context_parts = [
             "结构化需求摘要：",
-            json.dumps(requirements_summary, ensure_ascii=False, indent=2),
+            json.dumps(normalize_feature_fields(requirements_summary), ensure_ascii=False, indent=2),
         ]
         if conversation_messages:
             clarification_context = _format_conversation_context(conversation_messages)
@@ -326,16 +327,16 @@ class DocumentService:
 
         lc_messages.append(HumanMessage(content=_build_prd_from_summary_prompt(requirements_summary)))
 
-        draft_v1 = ""
+        initial_draft = ""
         async for chunk in llm.astream(lc_messages):
             if chunk.content:
-                draft_v1 += chunk.content
+                initial_draft += chunk.content
                 yield {"type": "text_delta", "phase": "writer", "content": chunk.content}
 
         yield {"type": "phase", "phase": "review_started"}
         review_result = await self.prd_reviewer.review(
             conversation_messages or [],
-            draft_v1,
+            initial_draft,
             review_context="\n".join(review_context_parts),
         )
         yield {"type": "review", "phase": "review", "content": review_result}
@@ -343,7 +344,7 @@ class DocumentService:
         if review_result.get("passed", False):
             yield {
                 "type": "done",
-                "final_prd": draft_v1,
+                "final_prd": initial_draft,
                 "review": review_result,
                 "revision_applied": False,
             }
@@ -351,7 +352,7 @@ class DocumentService:
 
         yield {"type": "phase", "phase": "rewrite_started"}
         rewrite_prompt = PRD_REWRITE_PROMPT_TEMPLATE.format(
-            current_draft=draft_v1,
+            current_draft=initial_draft,
             review_result=review_result,
         )
         rewrite_messages = [
@@ -370,15 +371,15 @@ class DocumentService:
         rewrite_messages.append(HumanMessage(content=rewrite_prompt))
 
         rewrite_llm = get_tracked_llm(LlmStep.PRD_REWRITE.value, temperature=0.2)
-        draft_v2 = ""
+        revised_draft = ""
         async for chunk in rewrite_llm.astream(rewrite_messages):
             if chunk.content:
-                draft_v2 += chunk.content
+                revised_draft += chunk.content
                 yield {"type": "text_delta", "phase": "rewrite", "content": chunk.content}
 
         yield {
             "type": "done",
-            "final_prd": draft_v2,
+            "final_prd": revised_draft,
             "review": review_result,
             "revision_applied": True,
         }
@@ -441,7 +442,7 @@ class DocumentService:
                         f"\n修复后输出片段：\n{_truncate_text(repaired_content)}"
                         f"\n重试后输出片段：\n{_truncate_text(regenerated_content)}"
                     ) from regenerate_error
-        return {"requirements_summary": updated_summary, "status": "completed"}
+        return {"requirements_summary": normalize_feature_fields(updated_summary), "status": "completed"}
 
     async def generate_api_docs_stream(
         self,

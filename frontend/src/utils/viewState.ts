@@ -1,5 +1,5 @@
 import type { Message } from '../types';
-import type { V2SessionData, V2ViewState } from '../services/sessionService';
+import type { ProjectSessionData, WorkspaceViewState } from '../services/sessionService';
 
 export function getVisibleClarificationMessages(messages: Message[]): Message[] {
   return messages.filter((m) => m.role !== 'system').slice(1);
@@ -9,7 +9,7 @@ export function hasClarificationContent(messages: Message[]): boolean {
   return getVisibleClarificationMessages(messages).some((m) => m.content?.trim());
 }
 
-export function repairStaleViewState(session: V2SessionData): V2ViewState {
+export function repairStaleViewState(session: ProjectSessionData): WorkspaceViewState {
   const viewState = session.viewState || 'form';
   const messages = session.messages || [];
 
@@ -32,7 +32,7 @@ export function repairStaleViewState(session: V2SessionData): V2ViewState {
   return 'form';
 }
 
-export function isDocumentStage(viewState: V2ViewState): boolean {
+export function isDocumentStage(viewState: WorkspaceViewState): boolean {
   return (
     viewState === 'generating-prd' ||
     viewState === 'review-prd' ||

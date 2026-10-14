@@ -8,7 +8,7 @@
     "product_goal",
     "target_users",
     "platform",
-    "mvp_features"
+    "features"
   ],
   "properties": {
     "product_name": {
@@ -43,7 +43,7 @@
       "minLength": 1,
       "description": "产品平台，如 Web App、小程序、App、CLI"
     },
-    "mvp_features": {
+    "features": {
       "type": "array",
       "minItems": 1,
       "items": {
@@ -83,14 +83,7 @@
           }
         ]
       },
-      "description": "MVP 功能列表，推荐传对象数组，至少包含 name 和 description"
-    },
-    "v2_features": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "未来规划功能"
+      "description": "产品功能列表，推荐传对象数组，至少包含 name 和 description"
     },
     "ui_pages": {
       "type": "array",
@@ -232,14 +225,14 @@
       "items": {
         "type": "string"
       },
-      "description": "本期范围内事项"
+      "description": "项目范围内事项"
     },
     "out_of_scope": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "description": "本期不做事项"
+      "description": "项目范围外事项"
     }
   }
 }

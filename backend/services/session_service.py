@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from db.database import get_connection
+from services.requirements_normalization import normalize_session_requirements
 from services.document_version_service import (
     migrate_session_documents_if_needed,
     refresh_session_content_from_documents,
@@ -99,7 +100,7 @@ def _fallback_before_prd(session_data: Dict[str, Any]) -> str:
 
 
 def normalize_session_view_state(session_data: Dict[str, Any]) -> Dict[str, Any]:
-    data = downgrade_generating_view_state(dict(session_data))
+    data = downgrade_generating_view_state(normalize_session_requirements(session_data))
     view_state = data.get("viewState")
     if view_state == "chatting" and not _has_clarification_content(data):
         data["viewState"] = "form"

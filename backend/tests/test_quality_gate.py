@@ -39,10 +39,10 @@ def test_empty_content():
 def test_api_docs_minimal():
     content = """
 ## 核心接口
-### POST /api/v1/tasks
+### POST /api/tasks
 {"code": 0, "data": {}}
 ## 边缘接口
-### GET /api/v1/health
+### GET /api/health
 """
     result = run_quality_gate("api-docs", content)
     assert result["doc_type"] == "api-docs"
@@ -50,7 +50,7 @@ def test_api_docs_minimal():
 
 
 def test_api_docs_missing_core():
-    content = '{"code": 0, "data": {}} /api/v1/x'
+    content = '{"code": 0, "data": {}} /api/x'
     result = run_quality_gate("api-docs", content)
     assert any(c["id"] == "api.section.core" and not c["passed"] for c in result["checks"])
 
@@ -63,7 +63,7 @@ def test_api_docs_skill_template_format():
 ### 1. 创建申请
 
 - **方法**：POST
-- **路径**：`/api/v1/applications`
+- **路径**：`/api/applications`
 - **功能**：发起人选择模板并填写表单。
 
 **请求参数**
@@ -82,7 +82,7 @@ def test_api_docs_skill_template_format():
 ### 健康检查
 
 - **方法**：GET
-- **路径**：`/api/v1/health`
+- **路径**：`/api/health`
 """
     result = run_quality_gate("api-docs", content)
     endpoint_check = next(c for c in result["checks"] if c["id"] == "api.endpoint.count")

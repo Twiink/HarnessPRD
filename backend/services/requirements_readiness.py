@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from services.requirements_normalization import normalize_feature_fields
+
 
 def _non_empty_lines(value: Any) -> List[str]:
     if not value:
@@ -45,6 +47,7 @@ def assess_requirements_readiness(
             "checks": [check],
         }
 
+    summary = normalize_feature_fields(summary)
     checks: List[Dict[str, Any]] = []
 
     product_name = str(summary.get("product_name") or "").strip()
@@ -69,16 +72,16 @@ def assess_requirements_readiness(
         }
     )
 
-    mvp = summary.get("mvp_features") or []
-    if not isinstance(mvp, list):
-        mvp = []
+    features = summary.get("features") or []
+    if not isinstance(features, list):
+        features = []
     checks.append(
         {
-            "id": "summary.mvp_features",
-            "label": "MVP 功能",
-            "passed": len(mvp) >= 1,
+            "id": "summary.features",
+            "label": "产品功能",
+            "passed": len(features) >= 1,
             "severity": "blocker",
-            "detail": None if len(mvp) >= 1 else "至少填写 1 条 MVP 功能",
+            "detail": None if len(features) >= 1 else "至少填写 1 条 产品功能",
         }
     )
 
@@ -100,7 +103,7 @@ def assess_requirements_readiness(
             "label": "在范围内",
             "passed": len(in_scope) >= 1,
             "severity": "warning",
-            "detail": None if in_scope else "建议补充本期交付范围",
+            "detail": None if in_scope else "建议补充项目交付范围",
         }
     )
 
@@ -111,7 +114,7 @@ def assess_requirements_readiness(
             "label": "不在范围内",
             "passed": len(out_scope) >= 1,
             "severity": "warning",
-            "detail": None if out_scope else "建议补充本期不做的事项",
+            "detail": None if out_scope else "建议补充项目范围外的事项",
         }
     )
 

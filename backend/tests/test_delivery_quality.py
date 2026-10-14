@@ -19,7 +19,7 @@ def _minimal_summary(**overrides):
         "product_goal": "帮助用户更高效地完成某项任务",
         "target_users": ["开发者"],
         "platform": "Web App",
-        "mvp_features": [
+        "features": [
             {"name": "功能A", "description": "描述足够长的功能说明", "user_value": "价值"},
         ],
     }

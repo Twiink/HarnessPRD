@@ -3,7 +3,7 @@ import type { StructuredFormData } from '../types/structuredForm';
 
 export type { StructuredFormData } from '../types/structuredForm';
 
-export type V2ViewState =
+export type WorkspaceViewState =
   | 'form'
   | 'chatting'
   | 'generating-prd'
@@ -22,12 +22,11 @@ export type RequirementsSummary = {
   product_goal: string;
   target_users: string[];
   platform: string;
-  mvp_features: Array<{
+  features: Array<{
     name: string;
     description: string;
     user_value: string;
   }>;
-  v2_features?: string[];
   ui_pages?: Array<{
     name: string;
     modules?: string[];
@@ -55,8 +54,8 @@ export type RequirementsSummary = {
   out_of_scope?: string[];
 };
 
-export type V2SessionData = {
-  viewState?: V2ViewState;
+export type ProjectSessionData = {
+  viewState?: WorkspaceViewState;
   entryMode?: EntryMode;
   formSubView?: FormSubView;
   formData?: StructuredFormData;
@@ -89,7 +88,7 @@ export type SessionSummary = {
 };
 
 export type SessionDetail = SessionSummary & {
-  session_data: V2SessionData;
+  session_data: ProjectSessionData;
 };
 
 export type SaveSessionResult = {
@@ -100,7 +99,7 @@ export type SaveSessionResult = {
 const API_BASE = '/api/session';
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingSave: { data: V2SessionData; id?: string } | null = null;
+let pendingSave: { data: ProjectSessionData; id?: string } | null = null;
 
 async function request<T>(url: string, options?: RequestInit): Promise<T | null> {
   try {
@@ -146,7 +145,7 @@ export async function loadSession(id: string): Promise<LoadSessionResult> {
   }
 }
 
-export async function saveSession(data: V2SessionData, id?: string): Promise<SaveSessionResult | null> {
+export async function saveSession(data: ProjectSessionData, id?: string): Promise<SaveSessionResult | null> {
   return request<SaveSessionResult>(`${API_BASE}/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -159,7 +158,7 @@ export async function deleteSession(id: string): Promise<boolean> {
   return result?.ok === true;
 }
 
-export function debouncedSaveSession(data: V2SessionData, id?: string, delay = 1000): void {
+export function debouncedSaveSession(data: ProjectSessionData, id?: string, delay = 1000): void {
   if (!id) return;
   pendingSave = { data, id };
   if (debounceTimer) clearTimeout(debounceTimer);
@@ -215,7 +214,7 @@ export async function flushPendingSave(): Promise<void> {
   }
 }
 
-/** 首次 save 后 replace 到 /v2/:id 时跳过 GET，避免 remount 覆盖本地 state */
+/** 首次 save 后 replace 到 /projects/:id 时跳过 GET，避免 remount 覆盖本地 state */
 export let skipNextSessionLoad = false;
 
 export function markSkipNextSessionLoad(): void {

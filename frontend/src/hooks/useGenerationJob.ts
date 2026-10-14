@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DocType, Message, PrdGenerationStage, PrdReviewResult } from '../types';
 import type { GeneratePrdStreamResult } from '../types';
 import type { JobArtifact, JobSnapshot } from '../types/job';
-import type { RequirementsSummary, V2ViewState } from '../services/sessionService';
+import type { RequirementsSummary, WorkspaceViewState } from '../services/sessionService';
 import { createJob, getJob } from '../services/jobApi';
 import { readJobStream } from '../utils/jobStream';
 import {
@@ -33,7 +33,7 @@ export type UseGenerationJobOptions = {
   messages: Message[];
   obs: ReturnType<typeof useGenerationObservability>;
   setContent: ContentSetters;
-  setViewState: (v: V2ViewState) => void;
+  setViewState: (v: WorkspaceViewState) => void;
   setPrdReviewResult: (v: PrdReviewResult | null) => void;
   setStreamingContent: (v: string) => void;
   setError: (v: string) => void;
@@ -112,12 +112,12 @@ export function useGenerationJob(options: UseGenerationJobOptions) {
                 setPrdGenerationStage('reviewing');
                 setStreamingContent('');
               } else if (phase === 'rewrite_started') {
-                const v1 = accumulated;
+                const initialDraft = accumulated;
                 accumulated = '';
                 setPrdGenerationStage('rewriting');
                 setStreamingContent('');
-                if (v1) {
-                  setContentForArtifact(artifact, v1, setContent);
+                if (initialDraft) {
+                  setContentForArtifact(artifact, initialDraft, setContent);
                 }
               }
             },

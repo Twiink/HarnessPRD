@@ -9,17 +9,6 @@ export interface ClarificationMeta {
   ready_to_generate: boolean;
 }
 
-export type ViewState =
-  | 'form'
-  | 'chatting'
-  | 'generating-prd'
-  | 'review-prd'
-  | 'generating-api-docs'
-  | 'review-api-docs'
-  | 'generating-prompts'
-  | 'review-prompts'
-  | 'done';
-
 export type DocType = 'prd' | 'api-docs' | 'prompts';
 
 export interface DocAction {

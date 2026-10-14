@@ -1,6 +1,6 @@
 import type { ClarificationMeta, Message } from '../types';
 import type { ClarificationState, ClarificationStatus } from '../types/clarificationState';
-import { getVisibleClarificationMessages } from './v2ViewState';
+import { getVisibleClarificationMessages } from './viewState';
 
 function isAssistantRole(role: Message['role']): boolean {
   return role === 'assistant' || role === 'ai';

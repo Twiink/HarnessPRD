@@ -7,6 +7,7 @@ import {
   updateVersionNote,
 } from '../services/documentApi';
 import type { DocumentType, DocumentVersionDetail, DocumentVersionListItem } from '../types/document';
+import { formatDocumentHistoryTime } from '../utils/documentVersions';
 
 type UseDocumentVersionsArgs = {
   sessionId: string | undefined;
@@ -84,7 +85,7 @@ export function useDocumentVersions({
         setCurrentVersionDetail(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载版本列表失败');
+      setError(err instanceof Error ? err.message : '加载历史记录失败');
     } finally {
       setIsLoadingList(false);
     }
@@ -116,7 +117,7 @@ export function useDocumentVersions({
         setPreview(detail);
         setPreviewVersionId(versionId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : '加载版本详情失败');
+        setError(err instanceof Error ? err.message : '加载历史详情失败');
       } finally {
         setIsLoadingPreview(false);
       }
@@ -136,7 +137,7 @@ export function useDocumentVersions({
         await refreshList();
         closePreview();
       } catch (err) {
-        setError(err instanceof Error ? err.message : '保存为新版本失败');
+        setError(err instanceof Error ? err.message : '保存快照失败');
         throw err;
       } finally {
         setIsCheckpointing(false);
@@ -182,7 +183,7 @@ export function useDocumentVersions({
       await refreshList();
       return result.content;
     } catch (err) {
-      setError(err instanceof Error ? err.message : '恢复此版本失败');
+      setError(err instanceof Error ? err.message : '恢复此记录失败');
       throw err;
     } finally {
       setIsRestoring(false);
@@ -191,7 +192,7 @@ export function useDocumentVersions({
 
   const activeDetail = preview ?? currentVersionDetail;
   const activeVersionReview = activeDetail?.metadata?.review ?? null;
-  const activeVersionLabel = activeDetail ? `v${activeDetail.version_no}` : null;
+  const activeVersionLabel = activeDetail ? formatDocumentHistoryTime(activeDetail.created_at) : null;
 
   return {
     versions,

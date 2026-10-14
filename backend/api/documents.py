@@ -125,7 +125,7 @@ async def api_get_version(session_id: str, doc_type: str, version_id: str):
     except InvalidDocTypeError:
         raise HTTPException(status_code=400, detail="无效的文档类型")
     except VersionNotFoundError:
-        raise HTTPException(status_code=404, detail="版本不存在")
+        raise HTTPException(status_code=404, detail="历史记录不存在")
     return VersionDetailResponse(
         id=data["id"],
         version_no=data["version_no"],
@@ -176,7 +176,7 @@ async def api_restore_version(session_id: str, doc_type: str, version_id: str):
     except InvalidDocTypeError:
         raise HTTPException(status_code=400, detail="无效的文档类型")
     except VersionNotFoundError:
-        raise HTTPException(status_code=404, detail="版本不存在")
+        raise HTTPException(status_code=404, detail="历史记录不存在")
     except RestoreError as e:
         raise HTTPException(status_code=400, detail=str(e))
     sync_session_mirror_for_doc_type(session_id, doc_type, result["content"])
@@ -205,7 +205,7 @@ async def api_update_version_note(
     except InvalidDocTypeError:
         raise HTTPException(status_code=400, detail="无效的文档类型")
     except VersionNotFoundError:
-        raise HTTPException(status_code=404, detail="版本不存在")
+        raise HTTPException(status_code=404, detail="历史记录不存在")
     meta = data.get("metadata") or {}
     return UpdateVersionNoteResponse(
         version_id=data["id"],

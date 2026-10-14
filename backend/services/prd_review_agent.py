@@ -62,7 +62,7 @@ def _build_review_regeneration_prompt(review_context: str, prd_draft: str) -> st
         '  "issues": [',
         "    {",
         '      "severity": "high",',
-        '      "section": "MVP 功能",',
+        '      "section": "产品功能",',
         '      "problem": "问题描述",',
         '      "suggestion": "修改建议"',
         "    }",

@@ -1,4 +1,4 @@
-export type MvpFeatureRow = {
+export type FeatureRow = {
   name: string;
   description: string;
   user_value: string;
@@ -15,8 +15,7 @@ export type StructuredFormData = {
   product_goal: string;
   target_users: string;
   platform: string;
-  mvp_features: MvpFeatureRow[];
-  v2_features: string;
+  features: FeatureRow[];
   ui_pages: UiPageRow[];
   interaction_notes: string;
   design_theme: string;
@@ -35,6 +34,6 @@ export type StructuredFormData = {
 };
 
 export type StructuredFormErrors = Partial<Record<keyof StructuredFormData, string>> & {
-  mvp_features?: string;
+  features?: string;
   ui_pages?: string;
 };

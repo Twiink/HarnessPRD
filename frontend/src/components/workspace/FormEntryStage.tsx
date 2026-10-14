@@ -1,5 +1,5 @@
 import type { FormSubView } from '../../services/sessionService';
-import { V2_PAGE_CLASS } from '../../constants/v2Layout';
+import { PAGE_CLASS } from '../../constants/layout';
 import ProjectEntryChooser from '../project-entry/ProjectEntryChooser';
 import ImportPrdPanel from '../project-entry/ImportPrdPanel';
 import ImportPromptsPanel from '../project-entry/ImportPromptsPanel';
@@ -44,7 +44,7 @@ export default function FormEntryStage({
 }: FormEntryStageProps) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <main className={`${V2_PAGE_CLASS} py-8`}>
+      <main className={`${PAGE_CLASS} py-8`}>
         {formSubView === 'chooser' && (
           <ProjectEntryChooser
             onSelectStructured={onSelectStructured}

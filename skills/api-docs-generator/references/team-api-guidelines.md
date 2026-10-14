@@ -6,11 +6,11 @@
 
 ## 路径命名
 
-- 基础路径统一使用 `/api/v1`。
-- 资源使用复数名词，例如 `/api/v1/tasks`、`/api/v1/copywritings`。
-- 动作用子资源表达，避免在路径中使用动词。例如重新生成文案使用 `POST /api/v1/copywritings:regenerate`，不要使用 `/regenerateCopywriting`。
+- 基础路径统一使用 `/api`。
+- 资源使用复数名词，例如 `/api/tasks`、`/api/copywritings`。
+- 动作用子资源表达，避免在路径中使用动词。例如重新生成文案使用 `POST /api/copywritings:regenerate`，不要使用 `/regenerateCopywriting`。
 - 查询类接口使用 `GET`，创建使用 `POST`，全量更新使用 `PUT`，局部更新使用 `PATCH`，删除使用 `DELETE`。
-- 批量接口使用 `/batch` 子路径，例如 `POST /api/v1/copywritings/batch`.
+- 批量接口使用 `/batch` 子路径，例如 `POST /api/copywritings/batch`.
 
 ## 请求规范
 

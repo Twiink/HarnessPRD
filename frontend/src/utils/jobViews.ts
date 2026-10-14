@@ -1,4 +1,4 @@
-import type { V2ViewState } from '../services/sessionService';
+import type { WorkspaceViewState } from '../services/sessionService';
 import type { DocType } from '../types';
 import type { JobArtifact, GenerationJobArtifact, OptimizeJobArtifact } from '../types/job';
 import {
@@ -39,14 +39,14 @@ export function docTypeFromOptimizeArtifact(artifact: OptimizeJobArtifact): DocT
   return 'prd';
 }
 
-export function generatingViewFor(artifact: JobArtifact): V2ViewState {
+export function generatingViewFor(artifact: JobArtifact): WorkspaceViewState {
   const contentArtifact = contentArtifactFromJob(artifact);
   if (contentArtifact === 'api-docs') return 'generating-api-docs';
   if (contentArtifact === 'prompts') return 'generating-prompts';
   return 'generating-prd';
 }
 
-export function reviewViewFor(artifact: JobArtifact): V2ViewState {
+export function reviewViewFor(artifact: JobArtifact): WorkspaceViewState {
   const contentArtifact = contentArtifactFromJob(artifact);
   if (contentArtifact === 'api-docs') return 'review-api-docs';
   if (contentArtifact === 'prompts') return 'review-prompts';

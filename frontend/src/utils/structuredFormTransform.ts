@@ -1,7 +1,7 @@
 import type { RequirementsSummary } from '../services/sessionService';
-import type { MvpFeatureRow, StructuredFormData, StructuredFormErrors, UiPageRow } from '../types/structuredForm';
+import type { FeatureRow, StructuredFormData, StructuredFormErrors, UiPageRow } from '../types/structuredForm';
 
-export const EMPTY_MVP_ROW: MvpFeatureRow = { name: '', description: '', user_value: '' };
+export const EMPTY_FEATURE_ROW: FeatureRow = { name: '', description: '', user_value: '' };
 export const EMPTY_UI_PAGE_ROW: UiPageRow = { name: '', modules: '', notes: '' };
 
 export const DEFAULT_FORM: StructuredFormData = {
@@ -9,8 +9,7 @@ export const DEFAULT_FORM: StructuredFormData = {
   product_goal: '',
   target_users: '',
   platform: '网页应用（Web App）',
-  mvp_features: [{ ...EMPTY_MVP_ROW }],
-  v2_features: '',
+  features: [{ ...EMPTY_FEATURE_ROW }],
   ui_pages: [{ ...EMPTY_UI_PAGE_ROW }],
   interaction_notes: '',
   design_theme: '',
@@ -31,7 +30,7 @@ export const DEFAULT_FORM: StructuredFormData = {
 function parseList(raw: string): string[] {
   return raw
     .split('\n')
-    .map((line) => line.trim().replace(/^[\d\-\*\.\、\s]+/, ''))
+    .map((line) => line.trim().replace(/^(?:[-*•]\s*|\d+[.)、]\s*)/, ''))
     .filter(Boolean);
 }
 
@@ -42,7 +41,7 @@ function parseCommaList(raw: string): string[] {
     .filter(Boolean);
 }
 
-export function legacyParseMvpFeatures(raw: string): MvpFeatureRow[] {
+export function parseFeatureRows(raw: string): FeatureRow[] {
   const rows = parseList(raw).map((line) => {
     const parts = line.split(/[|｜]/).map((part) => part.trim());
     return {
@@ -51,7 +50,7 @@ export function legacyParseMvpFeatures(raw: string): MvpFeatureRow[] {
       user_value: parts[2] || '',
     };
   });
-  return rows.length > 0 ? rows : [{ ...EMPTY_MVP_ROW }];
+  return rows.length > 0 ? rows : [{ ...EMPTY_FEATURE_ROW }];
 }
 
 export function legacyParseUiPages(raw: string): UiPageRow[] {
@@ -67,17 +66,12 @@ export function legacyParseUiPages(raw: string): UiPageRow[] {
 }
 
 export function normalizeFormData(raw: unknown): StructuredFormData {
-  const partial = (raw && typeof raw === 'object' ? raw : {}) as Partial<StructuredFormData> & {
-    mvp_features?: unknown;
-    ui_pages?: unknown;
-  };
+  const partial = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const base: StructuredFormData = { ...DEFAULT_FORM, ...partial };
-
-  if (typeof partial.mvp_features === 'string') {
-    base.mvp_features = legacyParseMvpFeatures(partial.mvp_features);
-  } else if (!Array.isArray(partial.mvp_features) || partial.mvp_features.length === 0) {
-    base.mvp_features = [{ ...EMPTY_MVP_ROW }];
-  }
+  const features = normalizeFeatureRows(partial.features, partial.mvp_features, partial.v2_features);
+  base.features = features.length ? features : [{ ...EMPTY_FEATURE_ROW }];
+  delete (base as unknown as Record<string, unknown>).mvp_features;
+  delete (base as unknown as Record<string, unknown>).v2_features;
 
   if (typeof partial.ui_pages === 'string') {
     base.ui_pages = legacyParseUiPages(partial.ui_pages);
@@ -88,20 +82,53 @@ export function normalizeFormData(raw: unknown): StructuredFormData {
   return base;
 }
 
+export function normalizeFeatureRows(...sources: unknown[]): FeatureRow[] {
+  const rows: FeatureRow[] = [];
+  for (const source of sources) {
+    const items = typeof source === 'string' ? parseFeatureRows(source) : Array.isArray(source) ? source : [];
+    for (const item of items) {
+      const row = typeof item === 'string'
+        ? { name: item.trim(), description: item.trim(), user_value: '' }
+        : item && typeof item === 'object'
+          ? {
+              name: String(item.name ?? '').trim(),
+              description: String(item.description ?? '').trim(),
+              user_value: String(item.user_value ?? '').trim(),
+            }
+          : null;
+      if (!row || !Object.values(row).some(Boolean)) continue;
+      const existing = row.name ? rows.find((entry) => entry.name === row.name) : undefined;
+      if (existing) {
+        for (const key of ['description', 'user_value'] as const) {
+          const value = row[key];
+          if (!value || value === '待确认' || value === existing[key]) continue;
+          if (!existing[key] || existing[key] === '待确认' || existing[key] === existing.name) {
+            existing[key] = value;
+          } else if (value !== row.name && !existing[key].split('；').includes(value)) {
+            existing[key] += `；${value}`;
+          }
+        }
+      } else {
+        rows.push(row);
+      }
+    }
+  }
+  return rows;
+}
+
 export function buildRequirementsSummary(formData: StructuredFormData): RequirementsSummary {
   return {
     product_name: formData.product_name.trim(),
     product_goal: formData.product_goal.trim(),
     target_users: parseList(formData.target_users),
     platform: formData.platform.trim(),
-    mvp_features: formData.mvp_features
+    features: formData.features
       .filter((row) => row.name.trim() || row.description.trim())
       .map((row) => ({
         name: row.name.trim() || '待确认',
         description: row.description.trim() || row.name.trim() || '待确认',
         user_value: row.user_value.trim() || '待确认',
       })),
-    v2_features: parseList(formData.v2_features),
     ui_pages: formData.ui_pages
       .filter((row) => row.name.trim())
       .map((row) => ({
@@ -137,7 +164,7 @@ function joinLines(items?: string[]): string {
 }
 
 export function summaryToFormData(summary: RequirementsSummary): StructuredFormData {
-  const mvpRows = (summary.mvp_features || []).map((item) => ({
+  const featureRows = (summary.features || []).map((item) => ({
     name: item.name || '',
     description: item.description || '',
     user_value: item.user_value || '',
@@ -153,8 +180,7 @@ export function summaryToFormData(summary: RequirementsSummary): StructuredFormD
     product_goal: summary.product_goal || '',
     target_users: joinLines(summary.target_users),
     platform: summary.platform || '网页应用（Web App）',
-    mvp_features: mvpRows.length > 0 ? mvpRows : [{ ...EMPTY_MVP_ROW }],
-    v2_features: joinLines(summary.v2_features),
+    features: featureRows.length > 0 ? featureRows : [{ ...EMPTY_FEATURE_ROW }],
     ui_pages: pageRows.length > 0 ? pageRows : [{ ...EMPTY_UI_PAGE_ROW }],
     interaction_notes: joinLines(summary.interaction_notes),
     design_theme: summary.design_requirements?.theme || '',
@@ -173,7 +199,7 @@ export function summaryToFormData(summary: RequirementsSummary): StructuredFormD
   };
 }
 
-function nonEmptyMvpRows(rows: MvpFeatureRow[]): MvpFeatureRow[] {
+function nonEmptyFeatureRows(rows: FeatureRow[]): FeatureRow[] {
   return rows.filter((row) => row.name.trim() || row.description.trim() || row.user_value.trim());
 }
 
@@ -189,13 +215,13 @@ export function validateStructuredForm(formData: StructuredFormData): Structured
   if (parseList(formData.target_users).length === 0) errors.target_users = '请至少填写一个目标用户';
   if (!formData.platform.trim()) errors.platform = '请选择平台';
 
-  const mvpRows = nonEmptyMvpRows(formData.mvp_features);
-  if (mvpRows.length === 0) {
-    errors.mvp_features = '请至少填写一个 MVP 功能';
+  const featureRows = nonEmptyFeatureRows(formData.features);
+  if (featureRows.length === 0) {
+    errors.features = '请至少填写一个产品功能';
   } else {
-    const invalid = mvpRows.find((row) => !row.name.trim() || !row.description.trim());
+    const invalid = featureRows.find((row) => !row.name.trim() || !row.description.trim());
     if (invalid) {
-      errors.mvp_features = '每个 MVP 功能需填写名称和描述';
+      errors.features = '每个产品功能需填写名称和描述';
     }
   }
 

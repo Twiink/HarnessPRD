@@ -7,7 +7,7 @@ import {
   type SessionSummary,
 } from '../services/sessionService';
 
-const V2_PAGE_CLASS = 'mx-auto w-full max-w-6xl px-6';
+import { PAGE_CLASS } from '../constants/layout';
 
 const ENTRY_MODE_LABELS: Record<string, string> = {
   structured: '从零创建',
@@ -59,7 +59,7 @@ export default function SessionList() {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white shadow-sm">
-        <div className={`${V2_PAGE_CLASS} flex items-center justify-between gap-4 py-3`}>
+        <div className={`${PAGE_CLASS} flex items-center justify-between gap-4 py-3`}>
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white">
               <Sparkles className="h-4 w-4" />
@@ -72,18 +72,17 @@ export default function SessionList() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => navigate('/v2')}
+              onClick={() => navigate('/')}
               className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
             >
               <Plus className="h-4 w-4" />
               新建方案
             </button>
-            <a href="/" className="text-sm text-slate-500 hover:text-slate-800">返回旧版</a>
           </div>
         </div>
       </header>
 
-      <main className={`${V2_PAGE_CLASS} py-8`}>
+      <main className={`${PAGE_CLASS} py-8`}>
         {loading ? (
           <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-500">
             加载中…
@@ -97,7 +96,7 @@ export default function SessionList() {
             </p>
             <button
               type="button"
-              onClick={() => navigate('/v2')}
+              onClick={() => navigate('/')}
               className="mt-6 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
             >
               去新建方案
@@ -124,7 +123,7 @@ export default function SessionList() {
                 <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => navigate(`/v2/${item.id}`)}
+                    onClick={() => navigate(`/projects/${item.id}`)}
                     className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
                     继续编辑

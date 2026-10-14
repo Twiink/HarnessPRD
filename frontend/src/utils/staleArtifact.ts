@@ -25,7 +25,7 @@ export function buildStaleWarnings(params: {
   ) {
     const label = docType === 'api-docs' ? '接口文档' : '提示词';
     warnings.push({
-      message: `PRD 已更新至 v${prdCurrentVersionNo}，当前${label}基于 v${derivedFrom.prd_version_no}。建议重新生成或手动核对。`,
+      message: `PRD 已更新，当前${label}需要同步。建议重新生成或手动核对。`,
       actionLabel: docType === 'api-docs' ? '重新生成接口文档' : '重新生成提示词',
       onAction: onRegenerate,
     });
@@ -39,7 +39,7 @@ export function buildStaleWarnings(params: {
     derivedFrom.api_docs_version_no < apiDocsCurrentVersionNo
   ) {
     warnings.push({
-      message: `接口文档已更新至 v${apiDocsCurrentVersionNo}，当前提示词基于 v${derivedFrom.api_docs_version_no}。建议重新生成或手动核对。`,
+      message: '接口文档已更新，当前提示词需要同步。建议重新生成或手动核对。',
       actionLabel: '重新生成提示词',
       onAction: onRegenerate,
     });

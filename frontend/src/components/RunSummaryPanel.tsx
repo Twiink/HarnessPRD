@@ -77,7 +77,7 @@ export default function RunSummaryPanel({
                 <details key={skill.skill_id} className="group">
                   <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
                     参考规范：{skill.skill_id}
-                    {skill.version ? ` (v${skill.version})` : ''} · {skill.artifacts.length} 个文件
+                    {' · '}{skill.artifacts.length} 个文件
                   </summary>
                   <ul className="ml-3 mt-1 list-disc pl-3 text-gray-500">
                     {skill.artifacts.map((path) => (

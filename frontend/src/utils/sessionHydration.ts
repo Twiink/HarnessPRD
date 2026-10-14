@@ -4,15 +4,15 @@ import {
   type EntryMode,
   type FormSubView,
   type RequirementsSummary,
-  type V2SessionData,
-  type V2ViewState,
+  type ProjectSessionData,
+  type WorkspaceViewState,
 } from '../services/sessionService';
 import { entryModeToFormSubView } from './formSubView';
 import { normalizeFormData } from './structuredFormTransform';
-import { repairStaleViewState } from './v2ViewState';
+import { repairStaleViewState } from './viewState';
 
 export type SessionHydrationSetters = {
-  setViewState: (v: V2ViewState) => void;
+  setViewState: (v: WorkspaceViewState) => void;
   setEntryMode: (v: EntryMode) => void;
   setFormSubView: (v: FormSubView) => void;
   setFormData: (v: StructuredFormData) => void;
@@ -34,7 +34,7 @@ export type SessionHydrationSetters = {
   setPrdBaselineContentHash: (v: string | null) => void;
 };
 
-export function applySessionData(session: V2SessionData, setters: SessionHydrationSetters): void {
+export function applySessionData(session: ProjectSessionData, setters: SessionHydrationSetters): void {
   if (session.viewState) setters.setViewState(repairStaleViewState(session));
   if (session.entryMode) setters.setEntryMode(session.entryMode);
   if (session.formSubView) {
