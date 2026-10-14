@@ -1,0 +1,19 @@
+bindings:
+  prd:
+    skills:
+      - prd-generator
+  optimize-prd:
+    skills:
+      - prd-generator
+  api-docs:
+    skills:
+      - api-docs-generator
+  optimize-api-docs:
+    skills:
+      - api-docs-generator
+  prompts:
+    skills:
+      - prompts-generator
+  optimize-prompts:
+    skills:
+      - prompts-generator

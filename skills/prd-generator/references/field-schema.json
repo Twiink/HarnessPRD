@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PRD Generator Input",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "product_name",
+    "product_goal",
+    "target_users",
+    "platform",
+    "mvp_features"
+  ],
+  "properties": {
+    "product_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "产品名称"
+    },
+    "product_goal": {
+      "type": "string",
+      "minLength": 1,
+      "description": "一句话描述产品要解决的问题"
+    },
+    "target_users": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "description": "目标用户，可为单个描述字符串或字符串数组"
+    },
+    "platform": {
+      "type": "string",
+      "minLength": 1,
+      "description": "产品平台，如 Web App、小程序、App、CLI"
+    },
+    "mvp_features": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "name",
+              "description"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "user_value": {
+                "type": "string"
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "P0",
+                  "P1",
+                  "P2"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "description": "MVP 功能列表，推荐传对象数组，至少包含 name 和 description"
+    },
+    "v2_features": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "未来规划功能"
+    },
+    "ui_pages": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "modules": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "notes": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "description": "页面或视图结构"
+    },
+    "interaction_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "关键交互或流程说明"
+    },
+    "design_requirements": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "theme": {
+          "type": "string"
+        },
+        "responsive": {
+          "type": "boolean"
+        },
+        "style_notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "设计与视觉要求"
+    },
+    "technical_constraints": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "auth": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "database": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "frontend": {
+          "type": "string"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "deployment": {
+          "type": "string"
+        },
+        "llm_usage": {
+          "type": "string"
+        },
+        "security": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "技术限制、实现约束与安全要求"
+    },
+    "non_functional_requirements": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "performance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "security": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "usability": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "compatibility": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "非功能需求"
+    },
+    "in_scope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "本期范围内事项"
+    },
+    "out_of_scope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "本期不做事项"
+    }
+  }
+}

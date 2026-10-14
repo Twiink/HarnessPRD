@@ -1,0 +1,21 @@
+# 模型物理顶（来自官方文档，人工维护；换模型时改这里，不改 .env）
+models:
+  deepseek-v4-flash:
+    provider: openai_compatible
+    context_window: 1000000
+    max_output_tokens: 384000
+    encoding: cl100k_base
+
+  deepseek-chat:
+    alias_of: deepseek-v4-flash
+
+  claude-3-5-sonnet-20241022:
+    provider: anthropic
+    context_window: 200000
+    max_output_tokens: 8192
+    encoding: cl100k_base
+
+  default:
+    context_window: 60000
+    max_output_tokens: 8192
+    encoding: cl100k_base
