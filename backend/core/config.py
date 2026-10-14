@@ -27,10 +27,10 @@ class Settings(BaseSettings):
 
     # 服务器配置
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 8001
 
     # CORS 配置
-    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    cors_origins: str = "http://localhost:5174,http://localhost:5173,http://localhost:3000"
 
     # 观测日志
     log_llm_metrics: bool = True
