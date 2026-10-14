@@ -1,0 +1,30 @@
+# 环境变量（含 API Key，绝不提交）
+backend/.env
+
+# Python
+.venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/data/
+
+# uv.lock 应提交，确保团队和 CI 使用同一组后端依赖。
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OpenViking 本地待同步摘要及覆盖配置
+.openviking/pending-memory.md
+.openviking/config.local.json
+.openviking/cache/
+
+
+# 系统文件
+.DS_Store
+Thumbs.db

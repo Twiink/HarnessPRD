@@ -1,0 +1,16 @@
+id: prompts-generator
+version: "1.0.0"
+label: 提示词套件生成规范
+description: Claude Code 提示词套件的结构模板与写作规则
+applies_to:
+  - prompts
+  - optimize-prompts
+artifacts:
+  - path: instructions.md
+    role: instructions
+  - path: references/prompts-template.md
+    role: template
+  - path: references/writing-rules.md
+    role: reference
+enabled: true
+priority: 10
