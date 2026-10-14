@@ -4,6 +4,7 @@ import type { PrdReviewResult } from '../types';
 import type { DocumentVersionListItem, DocumentVersionSourceKind } from '../types/document';
 import ReviewResultPanel from './ReviewResultPanel';
 import { shouldShowReviewPanel } from '../utils/prdReviewDisplay';
+import { formatDocumentHistoryTime } from '../utils/documentVersions';
 
 const SOURCE_LABELS: Record<DocumentVersionSourceKind, string> = {
   generate: '生成',
@@ -14,13 +15,7 @@ const SOURCE_LABELS: Record<DocumentVersionSourceKind, string> = {
   import: '导入',
 };
 
-function formatVersionTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-}
-
-type DocumentVersionPanelProps = {
+type DocumentHistoryPanelProps = {
   versions: DocumentVersionListItem[];
   currentVersionNo: number | null;
   previewVersionId: string | null;
@@ -42,7 +37,7 @@ type DocumentVersionPanelProps = {
   isGenerating?: boolean;
 };
 
-export default function DocumentVersionPanel({
+export default function DocumentHistoryPanel({
   versions,
   currentVersionNo,
   previewVersionId,
@@ -62,7 +57,7 @@ export default function DocumentVersionPanel({
   onRetry,
   generatingVersionNo = null,
   isGenerating = false,
-}: DocumentVersionPanelProps) {
+}: DocumentHistoryPanelProps) {
   const isGeneratingNewVersion = isGenerating && generatingVersionNo != null;
   const versionPanelLocked = isGenerating;
   const hasVersions = versions.length > 0 || generatingVersionNo != null;
@@ -95,9 +90,9 @@ export default function DocumentVersionPanel({
   const showReviewPanel = showReview && (isLoadingReview || shouldShowReviewPanel(review));
 
   return (
-    <div className="flex h-full w-72 flex-col border-l border-gray-100 bg-gray-50/80">
+    <div className="flex max-h-[40%] w-full shrink-0 flex-col border-t border-gray-100 bg-gray-50/80 lg:h-full lg:max-h-none lg:w-72 lg:border-l lg:border-t-0">
       <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-gray-100 px-4 py-3">
-        <h3 className="text-sm font-semibold text-gray-800">版本历史</h3>
+        <h3 className="text-sm font-semibold text-gray-800">历史记录</h3>
         {hasVersions && !isGenerating && (
           <button
             type="button"
@@ -106,7 +101,7 @@ export default function DocumentVersionPanel({
             className="flex items-center gap-1 rounded-md bg-primary-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isCheckpointing ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-            保存为新版本
+            保存快照
           </button>
         )}
       </div>
@@ -132,7 +127,7 @@ export default function DocumentVersionPanel({
             加载中...
           </div>
         ) : !hasVersions ? (
-          <p className="py-8 text-center text-sm text-gray-400">暂无版本历史</p>
+          <p className="py-8 text-center text-sm text-gray-400">暂无历史记录</p>
         ) : (
           <ul
             className={`space-y-1 ${versionPanelLocked ? 'pointer-events-none opacity-90' : ''}`}
@@ -155,7 +150,7 @@ export default function DocumentVersionPanel({
                           : 'animate-pulse bg-slate-400'
                       }`}
                     />
-                    <span className="text-sm font-medium text-gray-800">v{generatingVersionNo}</span>
+                    <span className="text-sm font-medium text-gray-800">文档生成</span>
                     <span
                       className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                         isGeneratingNewVersion
@@ -208,7 +203,7 @@ export default function DocumentVersionPanel({
                             isCurrent ? 'bg-primary-500' : 'bg-gray-300'
                           }`}
                         />
-                        <span className="text-sm font-medium text-gray-800">v{version.version_no}</span>
+                        <span className="text-sm font-medium text-gray-800">已保存文档</span>
                         {isCurrent && (
                           <span className="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-700">
                             当前
@@ -223,7 +218,7 @@ export default function DocumentVersionPanel({
                       <div className="mt-1 flex items-center gap-2 pl-4 text-xs text-gray-500">
                         <span>{sourceLabel}</span>
                         <span>·</span>
-                        <span>{formatVersionTime(version.created_at)}</span>
+                        <span>{formatDocumentHistoryTime(version.created_at)}</span>
                       </div>
                       {savedNote && !isEditingNote && (
                         <p className="mt-1.5 line-clamp-2 pl-4 text-xs leading-relaxed text-gray-600">
@@ -250,7 +245,7 @@ export default function DocumentVersionPanel({
                       <textarea
                         value={draftNote}
                         onChange={(event) => setDraftNote(event.target.value)}
-                        placeholder="补充版本说明，例如定稿前备份"
+                        placeholder="补充记录说明，例如定稿前备份"
                         rows={2}
                         maxLength={200}
                         disabled={isSavingNote}
@@ -313,8 +308,8 @@ export default function DocumentVersionPanel({
       {(currentVersionNo !== null || isGeneratingNewVersion) && !showReviewPanel && (
         <div className="flex-shrink-0 border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
           {isGeneratingNewVersion
-            ? `正在生成 v${generatingVersionNo}…`
-            : `当前工作稿 v${currentVersionNo}`}
+            ? '正在生成文档…'
+            : '当前工作稿'}
         </div>
       )}
     </div>

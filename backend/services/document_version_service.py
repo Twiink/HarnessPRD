@@ -628,7 +628,7 @@ def restore_version(
         doc = ensure_document(session_id, doc_type, conn=conn)
         current_id = doc.get("current_version_id")
         if not current_id:
-            raise RestoreError("尚无当前版本")
+            raise RestoreError("尚无当前文档")
 
         source_row = conn.execute(
             "SELECT * FROM document_versions WHERE id = ? AND document_id = ?",
@@ -638,11 +638,11 @@ def restore_version(
             raise VersionNotFoundError(version_id)
 
         if source_row["id"] == current_id:
-            raise RestoreError("该版本已是当前版本")
+            raise RestoreError("该记录已是当前工作稿")
 
         source_content = (source_row["content"] or "").strip()
         if not source_content:
-            raise RestoreError("该版本无内容可恢复")
+            raise RestoreError("该记录无内容可恢复")
 
         source_meta = _parse_metadata(source_row["metadata_json"])
         meta: Dict[str, Any] = {
@@ -778,8 +778,8 @@ def sync_from_job(
             metadata=metadata,
         )
     elif source_kind == VersionSourceKind.GENERATE:
-        # 生成进行中前端 debounce 可能已把流式草稿落成 auto_save 的 v1；
-        # 首次 Job 完成应覆盖 current，而不是再 append 出 v2。
+        # 生成进行中前端 debounce 可能已把流式草稿落成 auto_save 的初始记录；
+        # 首次 Job 完成应覆盖 current，而不是再 append 出重复记录。
         if _document_has_generate_version(session_id, doc_type):
             append_generated_version(
                 session_id,
@@ -858,7 +858,7 @@ def backfill_prd_review_metadata(
     session_id: str,
     session_data: Dict[str, Any],
 ) -> None:
-    """将 session 中的 prdReviewResult 回填到 v1 metadata（仅老数据迁移，无 metadata 时）。"""
+    """将 session 中的 prdReviewResult 回填到初始记录 metadata（仅老数据迁移，无 metadata 时）。"""
     review = _prd_review_from_session(session_data)
     if not review:
         return

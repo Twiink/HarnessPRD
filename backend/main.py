@@ -16,7 +16,7 @@ logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.I
 app = FastAPI(
     title="Vibe Coding API",
     description="对话式需求收集平台 API",
-    version="1.0.0"
+    version="current"
 )
 
 init_db()
@@ -42,7 +42,7 @@ app.include_router(documents_router)
 
 @app.get("/")
 async def root():
-    return {"message": "Vibe Coding API 运行中", "version": "1.0.0"}
+    return {"message": "Vibe Coding API 运行中"}
 
 
 @app.get("/health")

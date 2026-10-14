@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ClarificationGenerateConfirmModal from './ClarificationGenerateConfirmModal';
-import { V2_PAGE_CLASS } from '../../constants/v2Layout';
+import { PAGE_CLASS } from '../../constants/layout';
 import MessageList from '../MessageList';
 import ChatInput from '../ChatInput';
 import ClarificationWarnBanner from '../ClarificationWarnBanner';
 import ClarificationContextPanel from '../ClarificationContextPanel';
-import { getVisibleClarificationMessages } from '../../utils/v2ViewState';
+import { getVisibleClarificationMessages } from '../../utils/viewState';
 import { clarificationStatusClass } from '../../utils/clarificationState';
 import type { ClarificationState } from '../../types/clarificationState';
 import type { Message } from '../../types';
@@ -109,7 +109,7 @@ export default function ClarificationStage({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-shrink-0 border-b border-slate-200 bg-white py-3">
-        <div className={`${V2_PAGE_CLASS} flex flex-wrap items-center justify-between gap-3`}>
+        <div className={`${PAGE_CLASS} flex flex-wrap items-center justify-between gap-3`}>
           <div className="min-w-0 flex flex-wrap items-center gap-3">
             <div>
               <div className="text-sm font-medium text-slate-900">澄清对话</div>
@@ -164,14 +164,14 @@ export default function ClarificationStage({
         onScroll={handleChatScroll}
         className="min-h-0 flex-1 overflow-y-auto bg-slate-50/40"
       >
-        <div className={V2_PAGE_CLASS}>
+        <div className={PAGE_CLASS}>
           <MessageList messages={displayMessages} loading={isStreaming && streamingContent === ''} />
           <div ref={messagesEndRef} className="h-px shrink-0" aria-hidden />
         </div>
       </div>
 
       <div className="flex-shrink-0 border-t border-slate-200 bg-white pb-4 pt-3">
-        <div className={V2_PAGE_CLASS}>
+        <div className={PAGE_CLASS}>
           <ClarificationContextPanel rounds={obs.clarificationRounds} />
           <ClarificationWarnBanner
             visible={obs.contextUsage?.level === 'warn' || obs.contextUsage?.level === 'exceed'}

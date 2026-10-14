@@ -9,7 +9,7 @@
 ### 1. 生成文案
 
 - **方法**：POST
-- **路径**：`/api/v1/copywritings/generate`
+- **路径**：`/api/copywritings/generate`
 - **功能**：根据用户输入生成 3 条不同风格的文案结果。
 
 **请求参数**
@@ -48,7 +48,7 @@
 ### 2. 重新生成文案
 
 - **方法**：POST
-- **路径**：`/api/v1/copywritings:regenerate`
+- **路径**：`/api/copywritings:regenerate`
 - **功能**：基于上一次相同输入条件重新生成一组文案。
 
 **请求参数**
@@ -80,7 +80,7 @@
 ### 获取文案配置
 
 - **方法**：GET
-- **路径**：`/api/v1/copywritings/options`
+- **路径**：`/api/copywritings/options`
 - **功能**：返回场景、风格、字数范围等前端选项。
 
 **响应示例**

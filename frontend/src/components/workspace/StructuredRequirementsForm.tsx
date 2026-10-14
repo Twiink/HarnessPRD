@@ -1,5 +1,5 @@
 import { MessageSquare } from 'lucide-react';
-import MvpFeatureRowEditor from '../structured-form/MvpFeatureRowEditor';
+import FeatureRowEditor from '../structured-form/FeatureRowEditor';
 import UiPageRowEditor from '../structured-form/UiPageRowEditor';
 import FormTemplatePicker from '../structured-form/FormTemplatePicker';
 import { getTemplateById } from '../structured-form/formTemplates';
@@ -12,7 +12,7 @@ import {
   TextInput,
 } from '../structured-form/formFields';
 import type { StructuredFormData, StructuredFormErrors } from '../../types/structuredForm';
-import type { MvpFeatureRow, UiPageRow } from '../../types/structuredForm';
+import type { FeatureRow, UiPageRow } from '../../types/structuredForm';
 
 export type StructuredRequirementsFormProps = {
   formData: StructuredFormData;
@@ -23,7 +23,7 @@ export type StructuredRequirementsFormProps = {
   actionLocked: boolean;
   onBack: () => void;
   onFieldChange: (key: keyof StructuredFormData, value: string) => void;
-  onMvpFeaturesChange: (rows: MvpFeatureRow[]) => void;
+  onFeaturesChange: (rows: FeatureRow[]) => void;
   onUiPagesChange: (rows: UiPageRow[]) => void;
   onSelectTemplate: (id: string) => void;
   onClearForm: () => void;
@@ -39,7 +39,7 @@ export default function StructuredRequirementsForm({
   actionLocked,
   onBack,
   onFieldChange,
-  onMvpFeaturesChange,
+  onFeaturesChange,
   onUiPagesChange,
   onSelectTemplate,
   onClearForm,
@@ -124,21 +124,13 @@ export default function StructuredRequirementsForm({
           </div>
         </FormCollapsibleSection>
 
-        <FormCollapsibleSection title="功能与页面" description="MVP、页面结构与关键交互" defaultOpen>
+        <FormCollapsibleSection title="功能与页面" description="功能清单、页面结构与关键交互" defaultOpen>
           <div>
-            <FieldLabel title="MVP 功能" hint="点击添加行，填写功能名称、描述与用户价值" />
-            <MvpFeatureRowEditor
-              rows={formData.mvp_features}
-              onChange={onMvpFeaturesChange}
-              error={formErrors.mvp_features}
-            />
-          </div>
-          <div>
-            <FieldLabel title="未来规划（v2+）" hint="每行一个功能" />
-            <TextArea
-              rows={4}
-              value={formData.v2_features}
-              onChange={(e) => onFieldChange('v2_features', e.target.value)}
+            <FieldLabel title="产品功能" hint="点击添加行，填写功能名称、描述与用户价值" />
+            <FeatureRowEditor
+              rows={formData.features}
+              onChange={onFeaturesChange}
+              error={formErrors.features}
             />
           </div>
           <div>
@@ -242,7 +234,7 @@ export default function StructuredRequirementsForm({
           </div>
         </FormCollapsibleSection>
 
-        <FormCollapsibleSection title="非功能与范围" description="安全、性能、可用性与本期边界" defaultOpen={false}>
+        <FormCollapsibleSection title="非功能与范围" description="安全、性能、可用性与项目边界" defaultOpen={false}>
           <div className="grid gap-5 lg:grid-cols-3">
             <div>
               <FieldLabel title="安全要求" hint="每行一条" />
@@ -281,7 +273,7 @@ export default function StructuredRequirementsForm({
               <FieldError message={formErrors.in_scope} />
             </div>
             <div>
-              <FieldLabel title="不在范围内（本期）" hint="每行一条" />
+              <FieldLabel title="不在范围内（项目）" hint="每行一条" />
               <TextArea
                 invalid={!!formErrors.out_of_scope}
                 rows={4}

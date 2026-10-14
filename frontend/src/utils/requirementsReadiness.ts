@@ -104,35 +104,35 @@ export function assessRequirementsReadiness(input: AssessReadinessInput): Readin
     ),
   );
 
-  const mvp = summary.mvp_features || [];
+  const features = summary.features || [];
   checks.push(
     buildCheck(
-      'summary.mvp_features',
-      'MVP 功能',
-      mvp.length >= 1,
+      'summary.features',
+      '产品功能',
+      features.length >= 1,
       'blocker',
-      mvp.length >= 1 ? undefined : '至少填写 1 条 MVP 功能',
-      'mvp_features',
+      features.length >= 1 ? undefined : '至少填写 1 条产品功能',
+      'features',
     ),
   );
 
-  if (mvp.length > 0) {
-    const emptyDesc = mvp.filter((f) => !(f.description || '').trim()).length;
-    const shortDesc = mvp.filter((f) => ((f.description || '').trim().length > 0) && (f.description || '').trim().length < 10).length;
-    const half = Math.ceil(mvp.length / 2);
+  if (features.length > 0) {
+    const emptyDesc = features.filter((f) => !(f.description || '').trim()).length;
+    const shortDesc = features.filter((f) => ((f.description || '').trim().length > 0) && (f.description || '').trim().length < 10).length;
+    const half = Math.ceil(features.length / 2);
     const tooManyShort = shortDesc >= half;
     checks.push(
       buildCheck(
-        'summary.mvp_features.description',
-        'MVP 功能描述',
+        'summary.features.description',
+        '产品功能描述',
         emptyDesc === 0 && !tooManyShort,
         tooManyShort || emptyDesc > 0 ? 'warning' : 'warning',
         emptyDesc > 0
-          ? `${emptyDesc} 条 MVP 缺少功能描述`
+          ? `${emptyDesc} 条 产品功能 缺少功能描述`
           : tooManyShort
-            ? '过半数 MVP 描述过短（建议每条 ≥10 字）'
+            ? '过半数 产品功能 描述过短（建议每条 ≥10 字）'
             : undefined,
-        'mvp_features',
+        'features',
       ),
     );
   }
@@ -156,7 +156,7 @@ export function assessRequirementsReadiness(input: AssessReadinessInput): Readin
       '在范围内',
       inScope.length >= 1,
       'warning',
-      inScope.length >= 1 ? undefined : '建议补充本期交付范围',
+      inScope.length >= 1 ? undefined : '建议补充项目交付范围',
       'in_scope',
     ),
   );
@@ -168,7 +168,7 @@ export function assessRequirementsReadiness(input: AssessReadinessInput): Readin
       '不在范围内',
       outScope.length >= 1,
       'warning',
-      outScope.length >= 1 ? undefined : '建议补充本期不做的事项',
+      outScope.length >= 1 ? undefined : '建议补充项目范围外的事项',
       'out_of_scope',
     ),
   );

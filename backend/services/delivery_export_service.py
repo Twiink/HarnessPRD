@@ -68,15 +68,11 @@ def _compute_stale_warnings(
 
     api_derived = (api_meta.get("derived_from") or {}) if api_meta.get("content") else {}
     if prd_no and api_derived.get("prd_version_no") and api_derived["prd_version_no"] < prd_no:
-        warnings.append(
-            f"接口文档基于 PRD v{api_derived['prd_version_no']}，当前 PRD 为 v{prd_no}"
-        )
+        warnings.append("PRD 已更新，接口文档需要同步")
 
     prompts_derived = (prompts_meta.get("derived_from") or {}) if prompts_meta.get("content") else {}
     if prd_no and prompts_derived.get("prd_version_no") and prompts_derived["prd_version_no"] < prd_no:
-        warnings.append(
-            f"提示词基于 PRD v{prompts_derived['prd_version_no']}，当前 PRD 为 v{prd_no}"
-        )
+        warnings.append("PRD 已更新，提示词需要同步")
     api_no = snapshots["api-docs"].get("version_no")
     if (
         api_no
@@ -84,9 +80,7 @@ def _compute_stale_warnings(
         and not prompts_derived.get("api_docs_skipped")
         and prompts_derived["api_docs_version_no"] < api_no
     ):
-        warnings.append(
-            f"提示词基于接口文档 v{prompts_derived['api_docs_version_no']}，当前接口文档为 v{api_no}"
-        )
+        warnings.append("接口文档已更新，提示词需要同步")
     return warnings
 
 
@@ -104,7 +98,7 @@ def _build_readme(
         "2. API-Docs.md — 接口说明（如有）",
         "3. Prompts.md — AI 开发提示词（如有）",
         "",
-        "## 文档版本",
+        "## 文档清单",
         "",
     ]
     labels = {"prd": "PRD", "api-docs": "接口文档", "prompts": "提示词"}
@@ -113,9 +107,7 @@ def _build_readme(
         if not (snap.get("content") or "").strip():
             lines.append(f"- {label}：未包含")
             continue
-        vno = snap.get("version_no")
-        vlabel = f"v{vno}" if vno is not None else "（无版本记录）"
-        lines.append(f"- {label}：{vlabel}")
+        lines.append(f"- {label}：已包含")
 
     lines.extend(["", "## 质量摘要", ""])
     for doc_type, label in labels.items():
@@ -160,8 +152,8 @@ def build_delivery_zip(session_id: str) -> Tuple[bytes, str]:
         if not (snap.get("content") or "").strip():
             continue
         entry: Dict[str, Any] = {
-            "version_no": snap.get("version_no"),
-            "version_id": snap.get("version_id"),
+            "record_id": snap.get("version_id"),
+            "saved_at": snap.get("created_at"),
         }
         if doc_type == "prd" and session_data.get("prdBaselineConfirmedAt"):
             entry["baseline_confirmed_at"] = session_data.get("prdBaselineConfirmedAt")
@@ -173,7 +165,12 @@ def build_delivery_zip(session_id: str) -> Tuple[bytes, str]:
                 "summary": snap["review"].get("summary"),
             }
         if snap.get("derived_from"):
-            entry["derived_from"] = snap["derived_from"]
+            derived = snap["derived_from"]
+            entry["derived_from"] = {
+                "prd_record_id": derived.get("prd_version_id"),
+                "api_docs_record_id": derived.get("api_docs_version_id"),
+                "api_docs_skipped": derived.get("api_docs_skipped", False),
+            }
         documents_manifest[doc_type.replace("-", "_")] = entry
 
     manifest = {

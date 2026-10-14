@@ -1,5 +1,5 @@
 import type { Message } from '../types';
-import type { EntryMode, V2ViewState } from '../services/sessionService';
+import type { EntryMode, WorkspaceViewState } from '../services/sessionService';
 import type { StructuredFormData } from '../types/structuredForm';
 
 export type ArtifactId =
@@ -24,7 +24,7 @@ export type ArtifactNode = {
 
 export type ArtifactProgressInput = {
   entryMode: EntryMode;
-  viewState: V2ViewState;
+  viewState: WorkspaceViewState;
   formData: StructuredFormData;
   messages: Message[];
   prdContent: string;
@@ -48,7 +48,7 @@ function hasClarificationContent(messages: Message[]): boolean {
     .some((m) => m.content?.trim());
 }
 
-function getActiveArtifactId(entryMode: EntryMode, viewState: V2ViewState): ArtifactId {
+function getActiveArtifactId(entryMode: EntryMode, viewState: WorkspaceViewState): ArtifactId {
   if (viewState === 'chatting') return 'clarification';
   if (viewState === 'generating-prd' || viewState === 'review-prd') return 'prd';
   if (viewState === 'generating-api-docs' || viewState === 'review-api-docs') return 'api-docs';

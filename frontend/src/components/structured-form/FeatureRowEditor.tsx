@@ -1,10 +1,10 @@
 import { Plus, Trash2 } from 'lucide-react';
-import type { MvpFeatureRow } from '../../types/structuredForm';
-import { EMPTY_MVP_ROW } from '../../utils/structuredFormTransform';
+import type { FeatureRow } from '../../types/structuredForm';
+import { EMPTY_FEATURE_ROW } from '../../utils/structuredFormTransform';
 
-type MvpFeatureRowEditorProps = {
-  rows: MvpFeatureRow[];
-  onChange: (rows: MvpFeatureRow[]) => void;
+type FeatureRowEditorProps = {
+  rows: FeatureRow[];
+  onChange: (rows: FeatureRow[]) => void;
   error?: string;
 };
 
@@ -16,21 +16,21 @@ function inputClass(invalid?: boolean) {
   }`;
 }
 
-export default function MvpFeatureRowEditor({ rows, onChange, error }: MvpFeatureRowEditorProps) {
-  const updateRow = (index: number, patch: Partial<MvpFeatureRow>) => {
+export default function FeatureRowEditor({ rows, onChange, error }: FeatureRowEditorProps) {
+  const updateRow = (index: number, patch: Partial<FeatureRow>) => {
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   };
 
   const removeRow = (index: number) => {
     if (rows.length <= 1) {
-      onChange([{ ...EMPTY_MVP_ROW }]);
+      onChange([{ ...EMPTY_FEATURE_ROW }]);
       return;
     }
     onChange(rows.filter((_, i) => i !== index));
   };
 
   const addRow = () => {
-    onChange([...rows, { ...EMPTY_MVP_ROW }]);
+    onChange([...rows, { ...EMPTY_FEATURE_ROW }]);
   };
 
   return (

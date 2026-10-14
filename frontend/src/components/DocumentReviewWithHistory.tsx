@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DocumentReview, { type DocumentReviewProps } from './DocumentReview';
-import DocumentVersionPanel from './DocumentVersionPanel';
+import DocumentHistoryPanel from './DocumentHistoryPanel';
 import StaleArtifactBanner from './StaleArtifactBanner';
 import { useDocumentVersions } from '../hooks/useDocumentVersions';
 import { fetchVersionList } from '../services/documentApi';
-import { resolveCurrentVersionNo } from '../utils/documentVersions';
+import { formatDocumentHistoryTime, resolveCurrentVersionNo } from '../utils/documentVersions';
 import type { DocumentType } from '../types/document';
 import type { PrdReviewResult } from '../types';
 import type { QualityGateResult } from '../types/qualityGate';
@@ -34,7 +34,7 @@ function resolveVersionReview(
   return null;
 }
 
-export type DocumentReviewWithVersionsProps = {
+export type DocumentReviewWithHistoryProps = {
   sessionId: string | undefined;
   docType: DocumentType;
   content: string;
@@ -56,7 +56,7 @@ export type DocumentReviewWithVersionsProps = {
   | 'qualityGate'
 >;
 
-export default function DocumentReviewWithVersions({
+export default function DocumentReviewWithHistory({
   sessionId,
   docType,
   content,
@@ -66,7 +66,7 @@ export default function DocumentReviewWithVersions({
   headerBanner,
   onRegenerateStale,
   ...reviewProps
-}: DocumentReviewWithVersionsProps) {
+}: DocumentReviewWithHistoryProps) {
   const versions = useDocumentVersions({
     sessionId,
     docType,
@@ -98,8 +98,8 @@ export default function DocumentReviewWithVersions({
   }, [isGeneratingNow, versions.versions]);
 
   const isPreviewMode = !!versions.preview;
-  const previewLabel = versions.preview ? `v${versions.preview.version_no}` : undefined;
-  // 审查意见优先读版本 metadata；仅 v1 且无 metadata 时用 session 兜底（老数据迁移）
+  const previewLabel = versions.preview ? formatDocumentHistoryTime(versions.preview.created_at) : undefined;
+  // 审查意见优先读历史记录 metadata；初始记录缺少 metadata 时用 session 回填。
   const displayReview = resolveVersionReview(versions.activeDetail, reviewResult);
   const revisionApplied = resolveRevisionApplied(
     versions.activeDetail?.metadata?.run_summary?.revision_applied,
@@ -181,7 +181,7 @@ export default function DocumentReviewWithVersions({
           onContentChange(value);
         }}
         versionPanel={
-          <DocumentVersionPanel
+          <DocumentHistoryPanel
             versions={versions.versions}
             currentVersionNo={versions.currentVersionNo}
             previewVersionId={versions.previewVersionId}

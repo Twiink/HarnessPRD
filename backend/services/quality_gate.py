@@ -28,7 +28,7 @@ def _section_present(content: str, pattern: str) -> bool:
     return bool(re.search(pattern, content, re.IGNORECASE | re.MULTILINE))
 
 
-def _count_mvp_table_rows(prd_content: str) -> int:
+def _count_feature_table_rows(prd_content: str) -> int:
     lines = prd_content.splitlines()
     in_table = False
     count = 0
@@ -65,8 +65,8 @@ def _run_prd_checks(content: str) -> List[Dict[str, Any]]:
         _check("prd.section.nfr", "非功能需求章节", _section_present(content, r"##\s*5\.\s*非功能需求")),
         _check("prd.section.scope", "项目范围章节", _section_present(content, r"##\s*6\.\s*项目范围")),
         _check(
-            "prd.mvp.table",
-            "MVP 功能表格",
+            "prd.features.table",
+            "产品功能表格",
             bool(re.search(r"\|\s*功能名称\s*\|", content, re.IGNORECASE)),
         ),
         _check("prd.scope.in", "在范围内", _scope_has_content(content, "在范围内")),
@@ -99,14 +99,14 @@ def _count_api_endpoint_definitions(content: str) -> int:
     )
     structured_paths = len(
         re.findall(
-            r"路径[\s*：:]*[`'\"]?(/api/v\d+/[^\s`'\"`\n]+)",
+            r"路径[\s*：:]*[`'\"]?(/api/[^\s`'\"`\n]+)",
             content,
             re.IGNORECASE,
         )
     )
     inline_method_path = len(
         re.findall(
-            rf"(?:^|\n)\s*(?:-\s*)?(?:\*\*)?\s*({_HTTP_METHOD})\s+(/api/v\d+/[^\s\n]+)",
+            rf"(?:^|\n)\s*(?:-\s*)?(?:\*\*)?\s*({_HTTP_METHOD})\s+(/api/[^\s\n]+)",
             content,
             re.IGNORECASE,
         )
@@ -128,12 +128,12 @@ def _run_api_docs_checks(content: str) -> List[Dict[str, Any]]:
             "统一响应结构",
             bool(re.search(r'"code"', content) and re.search(r'"data"', content)),
         ),
-        _check("api.path.prefix", "API 路径前缀", bool(re.search(r"/api/v1", content))),
+        _check("api.path.prefix", "API 路径前缀", bool(re.search(r"/api(?:/|\b)", content))),
         _check(
             "api.endpoint.count",
             "接口条目",
             endpoint_count >= 1,
-            detail=None if endpoint_count >= 1 else "未识别到接口定义（需含 HTTP 方法与 /api/v1/ 路径）",
+            detail=None if endpoint_count >= 1 else "未识别到接口定义（需含 HTTP 方法与 /api/ 路径）",
         ),
     ]
 
@@ -194,7 +194,7 @@ def _run_prompts_checks(content: str, context: Optional[Dict[str, Any]] = None) 
     prd_content = (context.get("prd_content") or "").strip()
     feature_headings = _count_prompt_feature_headings(content)
     if prd_content:
-        expected = _count_mvp_table_rows(prd_content)
+        expected = _count_feature_table_rows(prd_content)
         if expected == 0:
             expected = max(1, len(re.findall(r"^\|\s*[^|]+\s*\|", prd_content, re.MULTILINE)) - 1)
         diff = abs(feature_headings - expected) if expected else 0
@@ -206,7 +206,7 @@ def _run_prompts_checks(content: str, context: Optional[Dict[str, Any]] = None) 
                 severity="high",
                 detail=None
                 if expected == 0 or diff <= 1
-                else f"功能开发提示词 {feature_headings} 条，PRD MVP 约 {expected} 条",
+                else f"功能开发提示词 {feature_headings} 条，PRD 产品功能 约 {expected} 条",
             )
         )
     else:

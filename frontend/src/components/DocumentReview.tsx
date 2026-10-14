@@ -136,7 +136,7 @@ export default function DocumentReview({
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       {/* 顶部栏 */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 px-6 py-3">
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-6 py-3">
         <div className="flex items-center gap-2">
           <FileText className="w-5 h-5 text-primary-500" />
           <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
@@ -147,7 +147,7 @@ export default function DocumentReview({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
           <button
             type="button"
             onClick={handleCopy}
@@ -178,12 +178,12 @@ export default function DocumentReview({
       )}
 
       {/* 主体：文档撑满，Review 结果在下方滚动 */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {isPreviewMode && previewLabel && onRestorePreview && (
-            <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-2">
+            <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-2">
               <p className="text-sm text-amber-800">
-                正在预览 {previewLabel}，恢复后将基于该版本创建新版本
+                正在预览 {previewLabel}，恢复后将保存为当前工作稿并保留历史记录
               </p>
               <button
                 type="button"
@@ -192,7 +192,7 @@ export default function DocumentReview({
                 className="flex flex-shrink-0 items-center gap-1.5 rounded-md bg-primary-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isRestoring ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                恢复此版本
+                恢复此记录
               </button>
             </div>
           )}
@@ -263,23 +263,23 @@ export default function DocumentReview({
           </div>
         )}
 
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => setShowOptimizeInput(!showOptimizeInput)}
             disabled={isReadOnly}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Sparkles className="w-4 h-4" />
             优化文档
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {actions.map((action, i) => (
               <button
                 key={i}
                 onClick={action.onClick}
                 disabled={action.disabled || isReadOnly}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`max-w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   action.variant === 'primary'
                     ? 'bg-primary-600 text-white hover:bg-primary-700'
                     : action.variant === 'secondary'

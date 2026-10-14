@@ -28,19 +28,16 @@ function formatConfirmedAt(iso: string): string {
 export default function BaselineConfirmBanner({
   confirmed,
   confirmedAt,
-  confirmedVersionNo,
   highIssueCount = 0,
   revisionApplied = false,
   onConfirm,
   confirmDisabled,
 }: BaselineConfirmBannerProps) {
   if (confirmed) {
-    const versionLabel =
-      confirmedVersionNo != null ? `基于 PRD v${confirmedVersionNo}` : '已确认需求基线';
     const timeLabel = confirmedAt ? ` · ${formatConfirmedAt(confirmedAt)}` : '';
     return (
       <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-        已确认需求基线 · {versionLabel}
+        已确认需求基线
         {timeLabel}
       </div>
     );

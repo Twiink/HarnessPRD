@@ -19,10 +19,10 @@ def _minimal_summary(**overrides):
         "product_goal": "帮助用户更高效地完成某项任务",
         "target_users": ["开发者"],
         "platform": "Web App",
-        "mvp_features": [
+        "features": [
             {"name": "功能A", "description": "描述足够长的功能说明", "user_value": "价值"},
         ],
-        "in_scope": ["MVP"],
+        "in_scope": ["产品功能"],
         "out_of_scope": ["登录"],
     }
     base.update(overrides)
@@ -41,9 +41,9 @@ def test_missing_product_name_blocker():
     assert any(c["id"] == "summary.product_name" for c in result["blockers"])
 
 
-def test_empty_mvp_blocker():
-    result = assess_requirements_readiness(_minimal_summary(mvp_features=[]))
-    assert any(c["id"] == "summary.mvp_features" for c in result["blockers"])
+def test_empty_features_blocker():
+    result = assess_requirements_readiness(_minimal_summary(features=[]))
+    assert any(c["id"] == "summary.features" for c in result["blockers"])
 
 
 def test_missing_summary():
@@ -55,6 +55,6 @@ def test_missing_summary():
 if __name__ == "__main__":
     test_ready_summary_no_blockers()
     test_missing_product_name_blocker()
-    test_empty_mvp_blocker()
+    test_empty_features_blocker()
     test_missing_summary()
     print("ok")

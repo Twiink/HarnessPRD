@@ -1,702 +1,1098 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { Sparkles, FileText, MessageSquare, ClipboardList, Code2, Download, CheckCircle2 } from 'lucide-react';
-import MessageList from './components/MessageList';
-import ChatInput from './components/ChatInput';
-import FormStep from './components/FormStep';
-import DocumentReview from './components/DocumentReview';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+  consumeSkipNextSessionLoad,
+  debouncedSaveSession,
+  exportDeliveryPackage,
+  flushPendingSave,
+  loadSession,
+  markSkipNextSessionLoad,
+  saveSession,
+  type EntryMode,
+  type FormSubView,
+  type RequirementsSummary,
+  type ProjectSessionData,
+  type WorkspaceViewState,
+} from './services/sessionService';
+import { buildArtifactNodes } from './utils/artifactProgress';
+import {
+  buildRequirementsSummary,
+  DEFAULT_FORM,
+  isSameFormData,
+  summaryToFormData,
+  validateStructuredForm,
+} from './utils/structuredFormTransform';
+import type { StructuredFormData, StructuredFormErrors } from './types/structuredForm';
+import DocumentReviewWithHistory from './components/DocumentReviewWithHistory';
+import SummaryDiffPanel from './components/SummaryDiffPanel';
+import StreamErrorBanner from './components/StreamErrorBanner';
+import FormEntryStage from './components/workspace/FormEntryStage';
+import ClarificationStage from './components/workspace/ClarificationStage';
+import AppHeader from './components/workspace/AppHeader';
+import SessionLoadErrorPage, { SessionLoadingPage } from './components/workspace/SessionLoadErrorPage';
+import { getTemplateById } from './components/structured-form/formTemplates';
+import { PAGE_CLASS } from './constants/layout';
+import { CLARIFICATION_SYSTEM_PROMPT } from './constants/clarificationPrompt';
+import { buildConversationSeed } from './utils/clarificationSeed';
+import { collectSummaryDiff } from './utils/summaryDiff';
+import { applySessionData } from './utils/sessionHydration';
+import { hasClarificationContent, isDocumentStage } from './utils/viewState';
+import { assessClarificationState } from './utils/clarificationState';
+import {
+  parseClarificationMeta,
+  stripClarificationStateBlock,
+} from './utils/clarificationResponse';
+import { canPerformAction, type DeliveryContext } from './utils/deliveryStage';
+import { shortContentHash } from './utils/baseline';
+import BaselineConfirmBanner, { countHighReviewIssuesForBaseline } from './components/BaselineConfirmBanner';
+import { fetchVersionList } from './services/documentApi';
+import { resolveCurrentVersionNo } from './utils/documentVersions';
 import { conversationApi } from './services/api';
-import type {
-  Message,
-  QuestionsConfig,
-  ViewState,
-  DocType,
-  PrdGenerationStage,
-  PrdReviewResult,
-} from './types';
+import { useGenerationObservability } from './hooks/useGenerationObservability';
+import { useGenerationJob } from './hooks/useGenerationJob';
+import { getErrorMessage } from './utils/streamErrors';
+import { clearBrowserDraft, loadBrowserDraft } from './utils/browserDraft';
+import type { DocType, DocAction, Message, PrdGenerationStage, PrdReviewResult } from './types';
 
-// ── 进度步骤 ──────────────────────────────────────────────────────────────────
+type SessionLoadState = 'idle' | 'loading' | 'ready' | 'not_found' | 'error';
 
-const STEPS = [
-  { id: 'form',         label: '描述产品',  icon: ClipboardList },
-  { id: 'chatting',     label: 'AI 对话',   icon: MessageSquare },
-  { id: 'review-prd',   label: 'PRD',       icon: FileText },
-  { id: 'review-api-docs', label: '接口文档', icon: Code2 },
-  { id: 'review-prompts',  label: '提示词',  icon: Sparkles },
-] as const;
-
-const STEP_INDEX: Record<ViewState, number> = {
-  'form': 0,
-  'chatting': 1,
-  'generating-prd': 2,
-  'review-prd': 2,
-  'generating-api-docs': 3,
-  'review-api-docs': 3,
-  'generating-prompts': 4,
-  'review-prompts': 4,
-  'done': 4,
-};
-
-// ── localStorage ─────────────────────────────────────────────────────────────
-
-const SESSION_KEY = 'vibecoding_session';
-
-type SessionData = {
-  formData?: Record<string, string>;
-  messages?: Message[];
-  conversationId?: string;
-  viewState?: ViewState;
-  prdContent?: string;
-  apiDocsContent?: string;
-  promptsContent?: string;
-};
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return `${fallback}：${error.message}`;
-  }
-  return fallback;
-}
-
-function saveSession(data: Partial<SessionData>) {
-  try {
-    const prev: SessionData = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ ...prev, ...data }));
-  } catch {}
-}
-
-function loadSession(): SessionData | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const s: SessionData = JSON.parse(raw);
-    // 降级 generating-* 状态，避免恢复到半生成状态
-    if (s.viewState?.startsWith('generating-')) {
-      const fallback: Record<string, ViewState> = {
-        'generating-prd': s.prdContent ? 'review-prd' : 'chatting',
-        'generating-api-docs': s.apiDocsContent ? 'review-api-docs' : 'review-prd',
-        'generating-prompts': s.promptsContent ? 'review-prompts' : 'review-api-docs',
-      };
-      s.viewState = fallback[s.viewState!] ?? 'chatting';
-    }
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-// ── 下载工具 ──────────────────────────────────────────────────────────────────
-
-function downloadFile(filename: string, content: string) {
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ── App ───────────────────────────────────────────────────────────────────────
-
-function App() {
-  const [viewState, setViewState] = useState<ViewState>('form');
-  const [questions, setQuestions] = useState<QuestionsConfig>({ base_questions: [], advanced_questions: [] });
-  const [formData, setFormData] = useState<Record<string, string>>({});
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
-  // 对话消息
+export default function App() {
+  const navigate = useNavigate();
+  const { id: routeId } = useParams<{ id: string }>();
+  const [browserDraft] = useState(() => routeId ? null : loadBrowserDraft());
+  const browserDraftApplied = useRef(false);
+  const [sessionId, setSessionId] = useState<string | undefined>(routeId);
+  const [isSavingSession, setIsSavingSession] = useState(false);
+  const [sessionLoadState, setSessionLoadState] = useState<SessionLoadState>(routeId ? 'loading' : 'idle');
+  const [viewState, setViewState] = useState<WorkspaceViewState>('form');
+  const [entryMode, setEntryMode] = useState<EntryMode>('structured');
+  const [formSubView, setFormSubView] = useState<FormSubView>('chooser');
+  const [formData, setFormData] = useState<StructuredFormData>(DEFAULT_FORM);
+  const [requirementsSummary, setRequirementsSummary] = useState<RequirementsSummary | null>(null);
+  const [pendingSummary, setPendingSummary] = useState<RequirementsSummary | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState('');
-
-  // 文档内容
   const [prdContent, setPrdContent] = useState('');
   const [apiDocsContent, setApiDocsContent] = useState('');
   const [promptsContent, setPromptsContent] = useState('');
-
-  // 流式状态（通用：聊天/生成/优化共用 streamingContent）
+  const [manualPrdInput, setManualPrdInput] = useState('');
+  const [manualApiDocsInput, setManualApiDocsInput] = useState('');
   const [streamingContent, setStreamingContent] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);   // 聊天流式
-  const [isGenerating, setIsGenerating] = useState(false); // 文档优化流式
+  const [clarificationStreamRaw, setClarificationStreamRaw] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [isSyncingSummary, setIsSyncingSummary] = useState(false);
+  const [error, setError] = useState('');
+  const [formErrors, setFormErrors] = useState<StructuredFormErrors>({});
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [prdGenerationStage, setPrdGenerationStage] = useState<PrdGenerationStage>('idle');
   const [prdReviewResult, setPrdReviewResult] = useState<PrdReviewResult | null>(null);
+  const [prdBaselineConfirmed, setPrdBaselineConfirmed] = useState(false);
+  const [prdBaselineConfirmedAt, setPrdBaselineConfirmedAt] = useState<string | null>(null);
+  const [prdBaselineVersionId, setPrdBaselineVersionId] = useState<string | null>(null);
+  const [prdBaselineVersionNo, setPrdBaselineVersionNo] = useState<number | null>(null);
+  const [prdBaselineContentHash, setPrdBaselineContentHash] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null | undefined>(undefined);
+  const prdGenerationStageRef = useRef<PrdGenerationStage>('idle');
+  const obs = useGenerationObservability();
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // ── 初始化 ─────────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    conversationApi.getQuestions().then(setQuestions).catch(console.error);
-    const session = loadSession();
-    if (session) {
-      if (session.formData) setFormData(session.formData);
-      if (session.messages?.length) setMessages(session.messages);
-      if (session.conversationId) setConversationId(session.conversationId);
-      if (session.viewState) setViewState(session.viewState);
-      if (session.prdContent) setPrdContent(session.prdContent);
-      if (session.apiDocsContent) setApiDocsContent(session.apiDocsContent);
-      if (session.promptsContent) setPromptsContent(session.promptsContent);
-    }
+  const invalidateBaseline = useCallback(() => {
+    setPrdBaselineConfirmed(false);
+    setPrdBaselineConfirmedAt(null);
+    setPrdBaselineVersionId(null);
+    setPrdBaselineVersionNo(null);
+    setPrdBaselineContentHash(null);
   }, []);
 
+  const jobGen = useGenerationJob({
+    sessionId,
+    sessionLoadState,
+    activeJobId,
+    messages,
+    obs,
+    setContent: { setPrdContent, setApiDocsContent, setPromptsContent },
+    setViewState,
+    setPrdReviewResult,
+    setStreamingContent,
+    setError,
+    setActiveJobId,
+    setPrdGenerationStage,
+    prdGenerationStageRef,
+    onInvalidateBaseline: invalidateBaseline,
+  });
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
-
-  // ── 展示用消息（过滤 system 和首条上下文 human）────────────────────────────
-
-  const displayMessages = useMemo(() => {
-    const visible = messages.filter((m) => m.role !== 'system').slice(1);
-    if (streamingContent && isStreaming) {
-      return [...visible, { role: 'ai' as const, content: streamingContent }];
-    }
-    return visible;
-  }, [messages, streamingContent, isStreaming]);
-
-  const userMessageCount = useMemo(
-    () => messages.filter((m) => m.role === 'human' || m.role === 'user').length,
-    [messages]
-  );
-  const canGeneratePrd = userMessageCount >= 2;
-
-  const productName = formData['product_name'] || '产品';
-  const prdGenerationStatusText = useMemo(() => {
-    if (prdGenerationStage === 'writing') return 'Writer Agent 正在起草...';
-    if (prdGenerationStage === 'reviewing') return 'Review Agent 正在审查...';
-    if (prdGenerationStage === 'rewriting') return 'Writer Agent 正在修订...';
-    return '生成中...';
+    prdGenerationStageRef.current = prdGenerationStage;
   }, [prdGenerationStage]);
 
-  // ── 表单 ───────────────────────────────────────────────────────────────────
+  const buildSessionSnapshot = useCallback((): ProjectSessionData => ({
+    viewState,
+    entryMode,
+    formSubView,
+    formData,
+    requirementsSummary,
+    pendingSummary,
+    messages,
+    conversationId,
+    prdContent,
+    apiDocsContent,
+    promptsContent,
+    manualPrdInput,
+    manualApiDocsInput,
+    prdReviewResult,
+    activeJobId,
+    prdBaselineConfirmed,
+    prdBaselineConfirmedAt,
+    prdBaselineVersionId,
+    prdBaselineVersionNo,
+    prdBaselineContentHash,
+  }), [
+    viewState,
+    entryMode,
+    formSubView,
+    formData,
+    requirementsSummary,
+    pendingSummary,
+    messages,
+    conversationId,
+    prdContent,
+    apiDocsContent,
+    promptsContent,
+    manualPrdInput,
+    manualApiDocsInput,
+    prdReviewResult,
+    activeJobId,
+    prdBaselineConfirmed,
+    prdBaselineConfirmedAt,
+    prdBaselineVersionId,
+    prdBaselineVersionNo,
+    prdBaselineContentHash,
+  ]);
 
-  const handleFormChange = (id: string, value: string) => {
-    const next = { ...formData, [id]: value };
-    setFormData(next);
-    saveSession({ formData: next });
+  const applySessionSetters = useMemo(
+    () => ({
+      setViewState,
+      setEntryMode,
+      setFormSubView,
+      setFormData,
+      setRequirementsSummary,
+      setPendingSummary,
+      setMessages,
+      setConversationId,
+      setPrdContent,
+      setApiDocsContent,
+      setPromptsContent,
+      setManualPrdInput,
+      setManualApiDocsInput,
+      setPrdReviewResult,
+      setActiveJobId,
+      setPrdBaselineConfirmed,
+      setPrdBaselineConfirmedAt,
+      setPrdBaselineVersionId,
+      setPrdBaselineVersionNo,
+      setPrdBaselineContentHash,
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    if (!routeId) {
+      setSessionId(undefined);
+      setSessionLoadState('idle');
+      if (browserDraft && !browserDraftApplied.current) {
+        applySessionData(browserDraft, applySessionSetters);
+        browserDraftApplied.current = true;
+      }
+      return;
+    }
+
+    if (consumeSkipNextSessionLoad()) {
+      setSessionId(routeId);
+      setSessionLoadState('ready');
+      return;
+    }
+
+    let cancelled = false;
+    setSessionLoadState('loading');
+    void loadSession(routeId).then((result) => {
+      if (cancelled) return;
+      if (result.status === 'ok') {
+        applySessionData(result.data.session_data, applySessionSetters);
+        setSessionId(routeId);
+        setSessionLoadState('ready');
+        return;
+      }
+      setSessionId(undefined);
+      setSessionLoadState(result.status === 'not_found' ? 'not_found' : 'error');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeId, applySessionSetters, browserDraft]);
+
+  useEffect(() => {
+    if (!sessionId || sessionLoadState !== 'ready') return;
+    debouncedSaveSession(buildSessionSnapshot(), sessionId);
+  }, [sessionId, sessionLoadState, buildSessionSnapshot]);
+
+  const ensureSessionCreated = useCallback(async (overrides?: Partial<ProjectSessionData>): Promise<string | null> => {
+    const snapshot = { ...buildSessionSnapshot(), ...overrides };
+    if (sessionId) {
+      if (overrides && Object.keys(overrides).length > 0) {
+        await saveSession(snapshot, sessionId);
+      }
+      return sessionId;
+    }
+    if (isSavingSession) return null;
+    setIsSavingSession(true);
+    const result = await saveSession(snapshot);
+    setIsSavingSession(false);
+    if (!result) {
+      setError('保存方案失败，请稍后重试');
+      return null;
+    }
+    markSkipNextSessionLoad();
+    clearBrowserDraft();
+    setSessionId(result.id);
+    navigate(`/projects/${result.id}`, { replace: true });
+    return result.id;
+  }, [sessionId, isSavingSession, buildSessionSnapshot, navigate]);
+
+  const goToSessionList = useCallback(async () => {
+    await flushPendingSave();
+    navigate('/projects');
+  }, [navigate]);
+
+  const summaryDiff = useMemo(
+    () => (requirementsSummary && pendingSummary ? collectSummaryDiff(requirementsSummary, pendingSummary) : []),
+    [requirementsSummary, pendingSummary],
+  );
+  const isTemplateFilled = useMemo(() => {
+    if (!selectedTemplateId) return false;
+    const template = getTemplateById(selectedTemplateId);
+    return template ? isSameFormData(formData, template.data) : false;
+  }, [formData, selectedTemplateId]);
+  const hasFormContent = useMemo(() => !isSameFormData(formData, DEFAULT_FORM), [formData]);
+  const documentDownloadBasename = useMemo(
+    () =>
+      formData.product_name.trim() ||
+      requirementsSummary?.product_name?.trim() ||
+      'document',
+    [formData.product_name, requirementsSummary?.product_name],
+  );
+  const hasClarification = useMemo(() => hasClarificationContent(messages), [messages]);
+
+  const clarificationState = useMemo(
+    () =>
+      assessClarificationState(messages, {
+        pendingClarificationMeta:
+          isStreaming && viewState === 'chatting'
+            ? parseClarificationMeta(clarificationStreamRaw) ?? undefined
+            : undefined,
+      }),
+    [messages, isStreaming, viewState, clarificationStreamRaw],
+  );
+
+  const buildDeliveryContext = useCallback(
+    (summaryOverride?: RequirementsSummary | null): DeliveryContext => ({
+      entryMode,
+      requirementsSummary: summaryOverride ?? pendingSummary ?? requirementsSummary,
+      messages,
+      clarificationState,
+      prdBaselineConfirmed,
+      prdContent,
+      apiDocsContent,
+      promptsContent,
+    }),
+    [
+      entryMode,
+      requirementsSummary,
+      pendingSummary,
+      messages,
+      clarificationState,
+      prdBaselineConfirmed,
+      prdContent,
+      apiDocsContent,
+      promptsContent,
+    ],
+  );
+
+  const apiDocsGate = useMemo(
+    () => canPerformAction(buildDeliveryContext(), 'generate_api_docs'),
+    [buildDeliveryContext],
+  );
+
+  const promptsGate = useMemo(
+    () => canPerformAction(buildDeliveryContext(), 'generate_prompts'),
+    [buildDeliveryContext],
+  );
+
+  const exportGate = useMemo(
+    () => canPerformAction(buildDeliveryContext(), 'export_bundle'),
+    [buildDeliveryContext],
+  );
+
+  useEffect(() => {
+    if (!prdBaselineConfirmed || !prdBaselineContentHash) return;
+    let cancelled = false;
+    void shortContentHash(prdContent).then((hash) => {
+      if (cancelled) return;
+      if (hash !== prdBaselineContentHash) {
+        invalidateBaseline();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [prdContent, prdBaselineConfirmed, prdBaselineContentHash, invalidateBaseline]);
+
+  const handleConfirmBaseline = useCallback(async () => {
+    if (!sessionId || !prdContent.trim()) return;
+    const list = await fetchVersionList(sessionId, 'prd');
+    const hash = await shortContentHash(prdContent);
+    setPrdBaselineConfirmed(true);
+    setPrdBaselineConfirmedAt(new Date().toISOString());
+    setPrdBaselineVersionId(list.current_version_id);
+    setPrdBaselineVersionNo(resolveCurrentVersionNo(list));
+    setPrdBaselineContentHash(hash);
+  }, [sessionId, prdContent]);
+
+  const handleExportDelivery = useCallback(async () => {
+    const gate = canPerformAction(buildDeliveryContext(), 'export_bundle');
+    if (!gate.allowed) {
+      setError(gate.reason ?? '无法导出');
+      return;
+    }
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+    try {
+      await exportDeliveryPackage(createdId);
+    } catch (err) {
+      setError(getErrorMessage(err, '导出交付包失败'));
+    }
+  }, [buildDeliveryContext, ensureSessionCreated]);
+
+  const artifactHandlers = useMemo(
+    () => ({
+      onGoRequirements: () => {
+        setFormSubView('structured');
+        setViewState('form');
+      },
+      onGoClarification: () => {
+        if (hasClarification) setViewState('chatting');
+      },
+      onGoPrd: () => {
+        if (prdContent.trim()) setViewState('review-prd');
+      },
+      onGoApiDocs: () => {
+        if (apiDocsContent.trim()) setViewState('review-api-docs');
+      },
+      onGoPrompts: () => {
+        if (promptsContent.trim()) setViewState('review-prompts');
+      },
+    }),
+    [hasClarification, prdContent, apiDocsContent, promptsContent],
+  );
+
+  const artifactNodes = useMemo(
+    () =>
+      buildArtifactNodes(
+        {
+          entryMode,
+          viewState,
+          formData,
+          messages,
+          prdContent,
+          apiDocsContent,
+          promptsContent,
+          manualApiDocsInput,
+        },
+        artifactHandlers,
+      ),
+    [
+      entryMode,
+      viewState,
+      formData,
+      messages,
+      prdContent,
+      apiDocsContent,
+      promptsContent,
+      manualApiDocsInput,
+      artifactHandlers,
+    ],
+  );
+
+  const updateField = (key: keyof StructuredFormData, value: string) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+    setFormErrors((prev) => ({ ...prev, [key]: undefined }));
   };
 
-  // ── 开始对话 ───────────────────────────────────────────────────────────────
+  const handleSelectTemplate = (id: string) => {
+    const template = getTemplateById(id);
+    if (!template) return;
+    setSelectedTemplateId(id);
+    setFormData(JSON.parse(JSON.stringify(template.data)) as StructuredFormData);
+    setFormErrors({});
+    setError('');
+  };
 
-  const handleStartConversation = async () => {
-    setIsStreaming(true);
-    setStreamingContent('');
+  const handleClearForm = () => {
+    setFormData(JSON.parse(JSON.stringify(DEFAULT_FORM)) as StructuredFormData);
+    setFormErrors({});
+    setSelectedTemplateId(null);
+    setError('');
+  };
+
+  const startStructuredConversation = async () => {
+    const validationErrors = validateStructuredForm(formData);
+    setFormErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      setError('请先修正表单中的格式问题，再开始澄清对话');
+      return;
+    }
+    setError('');
+
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+
+    const summary = buildRequirementsSummary(formData);
+    setRequirementsSummary(summary);
     setMessages([]);
+    obs.resetClarificationRounds();
+    setClarificationStreamRaw('');
+    setStreamingContent('');
+    setIsStreaming(true);
     setViewState('chatting');
 
     let accumulated = '';
     try {
-      const result = await conversationApi.startConversationStream('', formData, undefined, (chunk) => {
-        accumulated += chunk;
-        setStreamingContent(accumulated);
-      });
+      const result = await conversationApi.startConversationStream(
+        buildConversationSeed(summary),
+        {},
+        CLARIFICATION_SYSTEM_PROMPT,
+        (chunk) => {
+          accumulated += chunk;
+          setClarificationStreamRaw(accumulated);
+          setStreamingContent(stripClarificationStateBlock(accumulated));
+        },
+        {
+          ...obs.createClarificationHandlers(),
+        },
+      );
       setMessages(result.messages);
       setConversationId(result.conversation_id);
-      saveSession({ messages: result.messages, conversationId: result.conversation_id, viewState: 'chatting', formData });
     } catch (err) {
       console.error(err);
-      alert(getErrorMessage(err, '启动对话失败，请检查后端配置'));
+      const { message } = obs.captureStreamError(err, { fallback: '启动澄清对话失败，请检查后端配置' });
+      setError(message);
       setViewState('form');
     } finally {
+      setClarificationStreamRaw('');
       setStreamingContent('');
       setIsStreaming(false);
     }
   };
 
-  // ── 继续对话 ───────────────────────────────────────────────────────────────
-
-  const handleSendMessage = async (userInput: string) => {
-    if (isStreaming || isGenerating) return;
-
-    const withUser: Message[] = [...messages, { role: 'human', content: userInput }];
-    setMessages(withUser);
+  const continueConversation = async (userInput: string) => {
+    if (isStreaming) return;
+    obs.resetErrorMeta();
+    const nextMessages: Message[] = [...messages, { role: 'human', content: userInput }];
+    setMessages(nextMessages);
+    setClarificationStreamRaw('');
     setIsStreaming(true);
     setStreamingContent('');
 
     let accumulated = '';
     try {
       const result = await conversationApi.continueConversationStream(
-        conversationId, messages, userInput,
-        (chunk) => { accumulated += chunk; setStreamingContent(accumulated); }
+        conversationId,
+        messages,
+        userInput,
+        (chunk) => {
+          accumulated += chunk;
+          setClarificationStreamRaw(accumulated);
+          setStreamingContent(stripClarificationStateBlock(accumulated));
+        },
+        {
+          ...obs.createClarificationHandlers(),
+        },
       );
       setMessages(result.messages);
-      saveSession({ messages: result.messages });
     } catch (err) {
       console.error(err);
-      alert(getErrorMessage(err, '发送消息失败'));
+      const { message } = obs.captureStreamError(err, { fallback: '继续对话失败' });
+      setError(message);
       setMessages(messages);
     } finally {
+      setClarificationStreamRaw('');
       setStreamingContent('');
       setIsStreaming(false);
     }
   };
 
-  // ── 生成 PRD（流式） ────────────────────────────────────────────────────────
-
-  const handleGeneratePRD = async () => {
-    setPrdContent('');
-    setPrdReviewResult(null);
-    setViewState('generating-prd');
-    setStreamingContent('');
-    setPrdGenerationStage('writing');
-
-    let accumulated = '';
-    try {
-      const result = await conversationApi.generatePrdStream(
-        messages,
-        (chunk) => {
-          accumulated += chunk;
-          setStreamingContent(accumulated);
-        },
-        {
-          onPhase: (phase) => {
-            if (phase === 'writer_started') {
-              accumulated = '';
-              setPrdGenerationStage('writing');
-              setStreamingContent('');
-            } else if (phase === 'review_started') {
-              setPrdGenerationStage('reviewing');
-            } else if (phase === 'rewrite_started') {
-              accumulated = '';
-              setPrdGenerationStage('rewriting');
-              setStreamingContent('');
-            }
-          },
-          onReview: (review) => {
-            setPrdReviewResult(review);
-          },
-        }
-      );
-      setPrdContent(result.final_prd);
-      setPrdReviewResult(result.review);
-      setPrdGenerationStage('done');
-      saveSession({ prdContent: result.final_prd, viewState: 'review-prd' });
-      setViewState('review-prd');
-    } catch (err) {
-      console.error(err);
-      alert(getErrorMessage(err, '生成 PRD 失败'));
-      setPrdGenerationStage('error');
-      setViewState('chatting');
-    } finally {
-      setStreamingContent('');
+  const generateApiDocs = async (prd: string) => {
+    if (!prd.trim()) {
+      setError('缺少 PRD 内容，无法生成接口文档');
+      return;
     }
-  };
-
-  // ── 生成接口文档（流式） ────────────────────────────────────────────────────
-
-  const handleGenerateApiDocs = async () => {
-    setApiDocsContent('');
-    setViewState('generating-api-docs');
-    setStreamingContent('');
-
-    let accumulated = '';
-    try {
-      await conversationApi.generateApiDocsStream(prdContent, messages, (chunk) => {
-        accumulated += chunk;
-        setStreamingContent(accumulated);
-      });
-      setApiDocsContent(accumulated);
-      saveSession({ apiDocsContent: accumulated, viewState: 'review-api-docs' });
-      setViewState('review-api-docs');
-    } catch (err) {
-      console.error(err);
-      alert(getErrorMessage(err, '生成接口文档失败'));
-      setViewState('review-prd');
-    } finally {
-      setStreamingContent('');
+    const gate = canPerformAction(buildDeliveryContext(), 'generate_api_docs');
+    if (!gate.allowed) {
+      setError(gate.reason ?? '无法生成接口文档');
+      return;
     }
+    const createdId = await ensureSessionCreated({ prdContent: prd });
+    if (!createdId) return;
+
+    await jobGen.startApiDocs(prd, createdId);
   };
-
-  // ── 生成提示词（流式） ──────────────────────────────────────────────────────
-
-  const handleGeneratePrompts = async (skipApiDocs: boolean) => {
-    setPromptsContent('');
-    setViewState('generating-prompts');
-    setStreamingContent('');
-
-    let accumulated = '';
-    try {
-      await conversationApi.generatePromptsStream(
-        prdContent,
-        skipApiDocs ? '' : apiDocsContent,
-        (chunk) => { accumulated += chunk; setStreamingContent(accumulated); }
-      );
-      setPromptsContent(accumulated);
-      saveSession({ promptsContent: accumulated, viewState: 'review-prompts' });
-      setViewState('review-prompts');
-    } catch (err) {
-      console.error(err);
-      alert(getErrorMessage(err, '生成提示词失败'));
-      setViewState(skipApiDocs ? 'review-prd' : 'review-api-docs');
-    } finally {
-      setStreamingContent('');
-    }
-  };
-
-  // ── 优化文档（流式替换） ────────────────────────────────────────────────────
 
   const handleOptimizeDocument = async (
     docType: DocType,
     currentContent: string,
     instruction: string,
-    context: string
+    context: string,
   ) => {
-    setIsGenerating(true);
-    setStreamingContent('');
+    if (!currentContent.trim()) {
+      setError('当前文档为空，无法优化');
+      return;
+    }
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+    await jobGen.startOptimize(docType, currentContent, instruction, context);
+  };
 
-    let accumulated = '';
+  const generatePrompts = async (prd: string, apiDocs: string) => {
+    if (!prd.trim()) {
+      setError('缺少 PRD 内容，无法生成提示词');
+      return;
+    }
+    const gate = canPerformAction(buildDeliveryContext(), 'generate_prompts');
+    if (!gate.allowed) {
+      setError(gate.reason ?? '无法生成提示词');
+      return;
+    }
+    const createdId = await ensureSessionCreated({
+      prdContent: prd,
+      apiDocsContent: apiDocs,
+    });
+    if (!createdId) return;
+
+    await jobGen.startPrompts(prd, apiDocs, createdId);
+  };
+
+  const generatePrdForSummary = async (summary: RequirementsSummary) => {
+    if (!summary) {
+      setError('缺少结构化需求摘要，请先返回表单页重新开始');
+      return;
+    }
+    const gate = canPerformAction(buildDeliveryContext(summary), 'generate_prd');
+    if (!gate.allowed) {
+      setError(gate.reason ?? '需求尚未就绪');
+      return;
+    }
+    const createdId = await ensureSessionCreated();
+    if (!createdId) return;
+
+    await jobGen.startPrd(summary);
+  };
+
+  const syncSummaryBackToForm = async () => {
+    if (!requirementsSummary) {
+      setError('缺少结构化需求摘要，请先从表单页开始');
+      return;
+    }
+    if (messages.length === 0) {
+      setError('当前没有可用于回填的澄清对话');
+      return;
+    }
+    setError('');
+    setIsSyncingSummary(true);
     try {
-      await conversationApi.optimizeDocumentStream(docType, currentContent, instruction, context, (chunk) => {
-        accumulated += chunk;
-        setStreamingContent(accumulated);
-      });
-      if (docType === 'prd') {
-        setPrdContent(accumulated);
-        saveSession({ prdContent: accumulated });
-      } else if (docType === 'api-docs') {
-        setApiDocsContent(accumulated);
-        saveSession({ apiDocsContent: accumulated });
-      } else if (docType === 'prompts') {
-        setPromptsContent(accumulated);
-        saveSession({ promptsContent: accumulated });
+      const result = await conversationApi.syncSummaryFromConversation(requirementsSummary, messages);
+      const updatedSummary = result.requirements_summary as unknown as RequirementsSummary;
+      const diffs = collectSummaryDiff(requirementsSummary, updatedSummary);
+      if (diffs.length === 0) {
+        setRequirementsSummary(updatedSummary);
+        setFormData(summaryToFormData(updatedSummary));
+        setFormErrors({});
+        await generatePrdForSummary(updatedSummary);
+        return;
       }
+      setPendingSummary(updatedSummary);
     } catch (err) {
       console.error(err);
-      alert(getErrorMessage(err, '优化失败，请重试'));
+      setError(getErrorMessage(err, '回填结构化摘要失败'));
     } finally {
-      setStreamingContent('');
-      setIsGenerating(false);
+      setIsSyncingSummary(false);
     }
   };
 
-  // ── 结束任务 ────────────────────────────────────────────────────────────────
-
-  const handleEndTask = () => {
-    setViewState('done');
-    saveSession({ viewState: 'done' });
-  };
-
-  // ── 重新开始 ────────────────────────────────────────────────────────────────
-
-  const handleRestart = () => {
-    localStorage.removeItem(SESSION_KEY);
+  const resetPage = async () => {
+    await flushPendingSave();
+    clearBrowserDraft();
+    browserDraftApplied.current = true;
     setViewState('form');
+    setEntryMode('structured');
+    setFormSubView('chooser');
+    setFormData(DEFAULT_FORM);
+    setRequirementsSummary(null);
+    setPendingSummary(null);
     setMessages([]);
     setConversationId('');
     setPrdContent('');
+    setPrdReviewResult(null);
+    invalidateBaseline();
     setApiDocsContent('');
     setPromptsContent('');
-    setFormData({});
+    setManualPrdInput('');
+    setManualApiDocsInput('');
     setStreamingContent('');
+    setIsStreaming(false);
+    setError('');
+    setFormErrors({});
+    setSelectedTemplateId(null);
+    setActiveJobId(undefined);
+    obs.resetClarificationRounds();
+    obs.resetGeneration();
+    setSessionId(undefined);
+    navigate('/');
   };
 
-  // ── 进度步骤 ────────────────────────────────────────────────────────────────
+  const goBackFromReviewPrd = () => {
+    if (messages.length) {
+      setViewState('chatting');
+      return;
+    }
+    if (entryMode === 'prd') {
+      setFormSubView('import-prd');
+      setViewState('form');
+      return;
+    }
+    if (entryMode === 'prompts') {
+      setFormSubView('import-prompts');
+      setViewState('form');
+      return;
+    }
+    setFormSubView('structured');
+    setViewState('form');
+  };
 
-  const currentStepIdx = STEP_INDEX[viewState] ?? 0;
+  const confirmSkipApiDocs = useCallback(() => {
+    const gate = canPerformAction(buildDeliveryContext(), 'generate_prompts');
+    if (!gate.allowed) {
+      setError(gate.reason ?? '无法生成提示词');
+      return;
+    }
+    if (!window.confirm('跳过接口文档时，提示词可能缺少 API 细节。是否继续？')) return;
+    void generatePrompts(prdContent, '');
+  }, [prdContent, buildDeliveryContext]);
 
-  // ── 渲染 ─────────────────────────────────────────────────────────────────────
+  const prdReviewActions = useMemo((): DocAction[] => {
+    const base: DocAction[] = [
+      {
+        label: messages.length ? '返回对话' : '返回入口',
+        variant: 'secondary',
+        onClick: goBackFromReviewPrd,
+        disabled: jobGen.isOptimizingJob,
+      },
+    ];
+
+    return [
+      ...base,
+      {
+        label: '跳过接口文档，直接生成提示词',
+        variant: 'link',
+        onClick: confirmSkipApiDocs,
+        disabled: jobGen.isOptimizingJob || !promptsGate.allowed,
+      },
+      {
+        label: '生成接口文档 →',
+        variant: 'primary',
+        onClick: () => void generateApiDocs(prdContent),
+        disabled: jobGen.isOptimizingJob || !apiDocsGate.allowed,
+      },
+    ];
+  }, [
+    messages.length,
+    jobGen.isOptimizingJob,
+    prdContent,
+    apiDocsGate.allowed,
+    promptsGate.allowed,
+    goBackFromReviewPrd,
+    confirmSkipApiDocs,
+  ]);
+
+  const applyPendingSummary = () => {
+    if (!pendingSummary) return;
+    const gate = canPerformAction(buildDeliveryContext(pendingSummary), 'generate_prd');
+    if (!gate.allowed) {
+      setError(gate.reason ?? '需求尚未就绪');
+      return;
+    }
+    const nextSummary = pendingSummary;
+    setRequirementsSummary(nextSummary);
+    setFormData(summaryToFormData(nextSummary));
+    setPendingSummary(null);
+    setFormErrors({});
+    void generatePrdForSummary(nextSummary);
+  };
+
+  const discardPendingSummary = () => {
+    setPendingSummary(null);
+  };
+
+  const showSummaryDiffGate =
+    viewState === 'chatting' &&
+    (isSyncingSummary || (!!pendingSummary && summaryDiff.length > 0));
+
+  const enterPrdReviewFromInput = async () => {
+    if (!manualPrdInput.trim()) {
+      setError('请先填写 PRD 内容');
+      return;
+    }
+    const createdId = await ensureSessionCreated({ prdContent: manualPrdInput });
+    if (!createdId) return;
+    setError('');
+    setPrdContent(manualPrdInput);
+    setViewState('review-prd');
+  };
+
+  const enterPromptsStageFromInput = async () => {
+    if (!manualPrdInput.trim()) {
+      setError('请先填写 PRD 内容');
+      return;
+    }
+    const createdId = await ensureSessionCreated({
+      prdContent: manualPrdInput,
+      apiDocsContent: manualApiDocsInput,
+    });
+    if (!createdId) return;
+    setError('');
+    setPrdContent(manualPrdInput);
+    setApiDocsContent(manualApiDocsInput);
+    if (manualApiDocsInput.trim()) {
+      setViewState('review-api-docs');
+    } else {
+      setViewState('review-prd');
+    }
+  };
+
+  const startApiDocsFromPrdInput = async () => {
+    setPrdContent(manualPrdInput);
+    await generateApiDocs(manualPrdInput);
+  };
+
+  const startPromptsFromInput = async () => {
+    setPrdContent(manualPrdInput);
+    setApiDocsContent(manualApiDocsInput);
+    await generatePrompts(manualPrdInput, manualApiDocsInput);
+  };
+
+  const actionLocked = isSavingSession;
+
+  const structuredFormProps = useMemo(
+    () => ({
+      formData,
+      formErrors,
+      selectedTemplateId,
+      isTemplateFilled,
+      hasFormContent,
+      actionLocked,
+      onBack: () => setFormSubView('chooser'),
+      onFieldChange: updateField,
+      onFeaturesChange: (rows: StructuredFormData['features']) => {
+        setFormData((prev) => ({ ...prev, features: rows }));
+        setFormErrors((prev) => ({ ...prev, features: undefined }));
+      },
+      onUiPagesChange: (rows: StructuredFormData['ui_pages']) => {
+        setFormData((prev) => ({ ...prev, ui_pages: rows }));
+        setFormErrors((prev) => ({ ...prev, ui_pages: undefined }));
+      },
+      onSelectTemplate: handleSelectTemplate,
+      onClearForm: handleClearForm,
+      onStartClarification: () => void startStructuredConversation(),
+    }),
+    [
+      formData,
+      formErrors,
+      selectedTemplateId,
+      isTemplateFilled,
+      hasFormContent,
+      actionLocked,
+    ],
+  );
+
+  if (routeId && sessionLoadState === 'loading') {
+    return <SessionLoadingPage />;
+  }
+
+  if (routeId && sessionLoadState === 'not_found') {
+    return (
+      <SessionLoadErrorPage
+        title="方案不存在"
+        description="该方案可能已被删除，或链接无效。"
+        onGoList={() => navigate('/projects')}
+        onGoNew={() => navigate('/')}
+      />
+    );
+  }
+
+  if (routeId && sessionLoadState === 'error') {
+    return (
+      <SessionLoadErrorPage
+        title="方案加载失败"
+        description="暂时无法从服务端读取该方案，请稍后重试。"
+        onGoList={() => navigate('/projects')}
+        onGoNew={() => navigate('/')}
+      />
+    );
+  }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-100 px-6 py-3 flex-shrink-0">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-primary-700 rounded-lg flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-bold text-gray-900">Vibe Coding</span>
-          </div>
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
+      <AppHeader
+        artifactNodes={artifactNodes}
+        onGoSessionList={() => void goToSessionList()}
+        onResetPage={() => void resetPage()}
+      />
 
-          <div className="hidden sm:flex items-center gap-1">
-            {STEPS.map((step, idx) => {
-              const Icon = step.icon;
-              const isActive = currentStepIdx === idx;
-              const isDone = currentStepIdx > idx;
-              return (
-                <div key={step.id} className="flex items-center">
-                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                    isActive ? 'bg-primary-100 text-primary-700' : isDone ? 'text-green-600' : 'text-gray-400'
-                  }`}>
-                    <Icon className="w-3.5 h-3.5" />
-                    {step.label}
-                  </div>
-                  {idx < STEPS.length - 1 && (
-                    <div className={`w-6 h-px mx-1 ${isDone ? 'bg-green-400' : 'bg-gray-200'}`} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="w-20" />
-        </div>
-      </header>
-
-      {/* Main */}
-      <main className="flex-1 overflow-hidden">
-
-        {/* 表单阶段 */}
-        {viewState === 'form' && (
-          <FormStep
-            questions={questions}
-            formData={formData}
-            onChange={handleFormChange}
-            showAdvanced={showAdvanced}
-            onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
-            onSubmit={handleStartConversation}
-            loading={isStreaming}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {error && (
+          <StreamErrorBanner
+            message={error}
+            requestId={obs.errorRequestId}
+            onCopyRequestId={() => void obs.copyErrorRequestId()}
+            className={`${PAGE_CLASS} mt-4 flex-shrink-0`}
           />
         )}
 
-        {/* 对话阶段 */}
-        {viewState === 'chatting' && (
-          <div className="h-full flex flex-col">
-            <div className="flex-1 overflow-y-auto">
-              <MessageList
-                messages={displayMessages}
-                loading={isStreaming && streamingContent === ''}
+        {showSummaryDiffGate && (
+          <div className={`${PAGE_CLASS} flex min-h-0 flex-1 flex-col overflow-hidden`}>
+            <SummaryDiffPanel
+              items={summaryDiff}
+              loading={isSyncingSummary}
+              onConfirm={applyPendingSummary}
+              onCancel={discardPendingSummary}
+            />
+          </div>
+        )}
+
+        {viewState === 'form' && !showSummaryDiffGate && (
+          <FormEntryStage
+            formSubView={formSubView}
+            manualPrdInput={manualPrdInput}
+            manualApiDocsInput={manualApiDocsInput}
+            actionLocked={actionLocked}
+            onSelectStructured={() => {
+              setEntryMode('structured');
+              setFormSubView('structured');
+            }}
+            onSelectImportPrd={() => {
+              setEntryMode('prd');
+              setFormSubView('import-prd');
+            }}
+            onSelectImportPrompts={() => {
+              setEntryMode('prompts');
+              setFormSubView('import-prompts');
+            }}
+            onManualPrdInputChange={setManualPrdInput}
+            onManualApiDocsInputChange={setManualApiDocsInput}
+            onEnterPrdReview={() => void enterPrdReviewFromInput()}
+            onStartApiDocs={() => void startApiDocsFromPrdInput()}
+            onEnterPromptsStage={() => void enterPromptsStageFromInput()}
+            onStartPrompts={() => void startPromptsFromInput()}
+            onBackToChooser={() => setFormSubView('chooser')}
+            structuredFormProps={structuredFormProps}
+          />
+        )}
+
+        {viewState === 'chatting' && !showSummaryDiffGate && (
+          <ClarificationStage
+            messages={messages}
+            streamingContent={streamingContent}
+            isStreaming={isStreaming}
+            isSyncingSummary={isSyncingSummary}
+            actionLocked={actionLocked}
+            clarificationState={clarificationState}
+            obs={obs}
+            onBackToForm={() => {
+              setFormSubView('structured');
+              setViewState('form');
+            }}
+            onResetPage={() => void resetPage()}
+            onSyncSummary={() => void syncSummaryBackToForm()}
+            onSendMessage={continueConversation}
+          />
+        )}
+
+        {isDocumentStage(viewState) && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {viewState === 'generating-prd' && (
+              <DocumentReviewWithHistory
+                sessionId={sessionId}
+                docType="prd"
+                content={prdContent}
+                onContentChange={setPrdContent}
+                jobIdle={false}
+                title="产品需求文档（PRD）"
+                downloadFilename={`${documentDownloadBasename}-PRD`}
+                streamingContent={streamingContent}
+                isGeneratingPhase={true}
+                isGenerating={true}
+                generationSteps={obs.generationSteps}
+                generationElapsed={obs.generationElapsed}
+                generationHint={obs.generationHint}
+                runSummary={obs.getRunSummary('prd')}
+                reviewResult={prdReviewResult}
+                actions={[]}
+                onOptimize={() => {}}
               />
-              <div ref={messagesEndRef} />
-            </div>
-            <div className="border-t border-gray-100 bg-white px-4 pt-3 pb-4 flex-shrink-0">
-              <div className="max-w-4xl mx-auto space-y-2">
-                <ChatInput onSend={handleSendMessage} loading={isStreaming} />
-                {canGeneratePrd && (
-                  <div className="flex justify-end">
-                    <button
-                      onClick={handleGeneratePRD}
-                      disabled={isStreaming}
-                      className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-lg text-xs font-medium hover:from-primary-700 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      生成 PRD
-                    </button>
-                  </div>
+            )}
+
+            {viewState === 'review-prd' && (
+              <DocumentReviewWithHistory
+                sessionId={sessionId}
+                docType="prd"
+                content={prdContent}
+                onContentChange={setPrdContent}
+                jobIdle={!jobGen.isOptimizingJob && !jobGen.isJobRunning}
+                title="产品需求文档（PRD）"
+                downloadFilename={`${documentDownloadBasename}-PRD`}
+                streamingContent={jobGen.isOptimizingJob ? streamingContent : undefined}
+                isGenerating={jobGen.isOptimizingJob}
+                runSummary={obs.getRunSummary('prd')}
+                reviewResult={prdReviewResult}
+                headerBanner={({ revisionApplied, displayReview }) => (
+                  <BaselineConfirmBanner
+                    confirmed={prdBaselineConfirmed}
+                    confirmedAt={prdBaselineConfirmedAt}
+                    confirmedVersionNo={prdBaselineVersionNo}
+                    revisionApplied={revisionApplied}
+                    highIssueCount={countHighReviewIssuesForBaseline(displayReview, revisionApplied)}
+                    onConfirm={() => void handleConfirmBaseline()}
+                    confirmDisabled={!prdContent.trim() || jobGen.isOptimizingJob}
+                  />
                 )}
-              </div>
-            </div>
+                actions={prdReviewActions}
+                onOptimize={(instruction) => void handleOptimizeDocument('prd', prdContent, instruction, '')}
+              />
+            )}
+
+            {viewState === 'generating-api-docs' && (
+              <DocumentReviewWithHistory
+                sessionId={sessionId}
+                docType="api-docs"
+                content={apiDocsContent}
+                onContentChange={setApiDocsContent}
+                jobIdle={false}
+                title="接口文档"
+                downloadFilename={`${documentDownloadBasename}-API-Docs`}
+                streamingContent={streamingContent}
+                isGeneratingPhase={true}
+                isGenerating={true}
+                generationSteps={obs.generationSteps}
+                generationElapsed={obs.generationElapsed}
+                generationHint={obs.generationHint}
+                runSummary={obs.getRunSummary('api-docs')}
+                actions={[]}
+                onOptimize={() => {}}
+              />
+            )}
+
+            {viewState === 'review-api-docs' && (
+              <DocumentReviewWithHistory
+                sessionId={sessionId}
+                docType="api-docs"
+                content={apiDocsContent}
+                onContentChange={setApiDocsContent}
+                jobIdle={!jobGen.isOptimizingJob && !jobGen.isJobRunning}
+                title="接口文档"
+                downloadFilename={`${documentDownloadBasename}-API-Docs`}
+                streamingContent={jobGen.isOptimizingJob ? streamingContent : undefined}
+                isGenerating={jobGen.isOptimizingJob}
+                runSummary={obs.getRunSummary('api-docs')}
+                onRegenerateStale={() => void generateApiDocs(prdContent)}
+                actions={[
+                  {
+                    label: '返回 PRD',
+                    variant: 'secondary',
+                    onClick: () => setViewState('review-prd'),
+                    disabled: jobGen.isOptimizingJob,
+                  },
+                  {
+                    label: '生成提示词 →',
+                    variant: 'primary',
+                    onClick: () => void generatePrompts(prdContent, apiDocsContent),
+                    disabled: jobGen.isOptimizingJob || !promptsGate.allowed,
+                  },
+                ]}
+                onOptimize={(instruction) =>
+                  void handleOptimizeDocument('api-docs', apiDocsContent, instruction, prdContent)
+                }
+              />
+            )}
+
+            {viewState === 'generating-prompts' && (
+              <DocumentReviewWithHistory
+                sessionId={sessionId}
+                docType="prompts"
+                content={promptsContent}
+                onContentChange={setPromptsContent}
+                jobIdle={false}
+                title="提示词套件"
+                downloadFilename={`${documentDownloadBasename}-Prompts`}
+                streamingContent={streamingContent}
+                isGeneratingPhase={true}
+                isGenerating={true}
+                generationSteps={obs.generationSteps}
+                generationElapsed={obs.generationElapsed}
+                generationHint={obs.generationHint}
+                runSummary={obs.getRunSummary('prompts')}
+                actions={[]}
+                onOptimize={() => {}}
+              />
+            )}
+
+            {viewState === 'review-prompts' && (
+              <DocumentReviewWithHistory
+                sessionId={sessionId}
+                docType="prompts"
+                content={promptsContent}
+                onContentChange={setPromptsContent}
+                jobIdle={!jobGen.isOptimizingJob && !jobGen.isJobRunning}
+                title="提示词套件"
+                downloadFilename={`${documentDownloadBasename}-Prompts`}
+                streamingContent={jobGen.isOptimizingJob ? streamingContent : undefined}
+                isGenerating={jobGen.isOptimizingJob}
+                runSummary={obs.getRunSummary('prompts')}
+                onRegenerateStale={() => void generatePrompts(prdContent, apiDocsContent)}
+                actions={[
+                  {
+                    label: apiDocsContent.trim() ? '返回接口文档' : '返回 PRD',
+                    variant: 'secondary',
+                    onClick: () => setViewState(apiDocsContent.trim() ? 'review-api-docs' : 'review-prd'),
+                    disabled: jobGen.isOptimizingJob,
+                  },
+                  {
+                    label: '导出交付包',
+                    variant: 'primary',
+                    onClick: () => void handleExportDelivery(),
+                    disabled: jobGen.isOptimizingJob || !exportGate.allowed,
+                  },
+                ]}
+                onOptimize={(instruction) =>
+                  void handleOptimizeDocument(
+                    'prompts',
+                    promptsContent,
+                    instruction,
+                    `${prdContent}\n\n${apiDocsContent}`,
+                  )
+                }
+              />
+            )}
           </div>
         )}
-
-        {/* PRD 生成中 */}
-        {viewState === 'generating-prd' && (
-          <DocumentReview
-            title="产品需求文档（PRD）"
-            content=""
-            streamingContent={streamingContent}
-            isGeneratingPhase={true}
-            isGenerating={true}
-            generationStatusText={prdGenerationStatusText}
-            reviewResult={prdReviewResult}
-            actions={[]}
-            onSaveEdit={() => {}}
-            onOptimize={() => {}}
-          />
-        )}
-
-        {/* PRD 审核 */}
-        {viewState === 'review-prd' && (
-          <DocumentReview
-            title="产品需求文档（PRD）"
-            content={prdContent}
-            downloadFilename={`${productName}-PRD`}
-            streamingContent={isGenerating ? streamingContent : undefined}
-            isGenerating={isGenerating}
-            reviewResult={prdReviewResult}
-            actions={[
-              {
-                label: '返回对话',
-                variant: 'secondary',
-                onClick: () => setViewState('chatting'),
-                disabled: isGenerating,
-              },
-              {
-                label: '结束任务',
-                variant: 'ghost',
-                onClick: handleEndTask,
-                disabled: isGenerating,
-              },
-              {
-                label: '直接生成提示词',
-                variant: 'secondary',
-                onClick: () => handleGeneratePrompts(true),
-                disabled: isGenerating,
-              },
-              {
-                label: '生成接口文档 →',
-                variant: 'primary',
-                onClick: handleGenerateApiDocs,
-                disabled: isGenerating,
-              },
-            ]}
-            onSaveEdit={(c) => { setPrdContent(c); saveSession({ prdContent: c }); }}
-            onOptimize={(inst) => handleOptimizeDocument('prd', prdContent, inst, '')}
-          />
-        )}
-
-        {/* 接口文档生成中 */}
-        {viewState === 'generating-api-docs' && (
-          <DocumentReview
-            title="接口文档"
-            content=""
-            streamingContent={streamingContent}
-            isGeneratingPhase={true}
-            isGenerating={true}
-            actions={[]}
-            onSaveEdit={() => {}}
-            onOptimize={() => {}}
-          />
-        )}
-
-        {/* 接口文档审核 */}
-        {viewState === 'review-api-docs' && (
-          <DocumentReview
-            title="接口文档"
-            content={apiDocsContent}
-            downloadFilename={`${productName}-API-Docs`}
-            streamingContent={isGenerating ? streamingContent : undefined}
-            isGenerating={isGenerating}
-
-            actions={[
-              {
-                label: '结束任务',
-                variant: 'ghost',
-                onClick: handleEndTask,
-                disabled: isGenerating,
-              },
-              {
-                label: '生成提示词 →',
-                variant: 'primary',
-                onClick: () => handleGeneratePrompts(false),
-                disabled: isGenerating,
-              },
-            ]}
-            onSaveEdit={(c) => { setApiDocsContent(c); saveSession({ apiDocsContent: c }); }}
-            onOptimize={(inst) => handleOptimizeDocument('api-docs', apiDocsContent, inst, prdContent)}
-          />
-        )}
-
-        {/* 提示词生成中 */}
-        {viewState === 'generating-prompts' && (
-          <DocumentReview
-            title="AI 提示词套件"
-            content=""
-            streamingContent={streamingContent}
-            isGeneratingPhase={true}
-            isGenerating={true}
-            actions={[]}
-            onSaveEdit={() => {}}
-            onOptimize={() => {}}
-          />
-        )}
-
-        {/* 提示词审核 */}
-        {viewState === 'review-prompts' && (
-          <DocumentReview
-            title="AI 提示词套件"
-            content={promptsContent}
-            downloadFilename={`${productName}-Prompts`}
-            streamingContent={isGenerating ? streamingContent : undefined}
-            isGenerating={isGenerating}
-            actions={[
-              {
-                label: '完成，下载全部',
-                variant: 'primary',
-                onClick: handleEndTask,
-                disabled: isGenerating,
-              },
-            ]}
-            onSaveEdit={(c) => { setPromptsContent(c); saveSession({ promptsContent: c }); }}
-            onOptimize={(inst) =>
-              handleOptimizeDocument('prompts', promptsContent, inst, `${prdContent}\n\n${apiDocsContent}`)
-            }
-          />
-        )}
-
-        {/* 完成总结页 */}
-        {viewState === 'done' && (
-          <div className="h-full flex items-center justify-center">
-            <div className="max-w-lg w-full mx-auto px-6">
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle2 className="w-8 h-8 text-green-600" />
-                </div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">全部完成！</h2>
-                <p className="text-gray-500">以下文档已生成，点击下载保存</p>
-              </div>
-
-              <div className="space-y-3 mb-8">
-                {prdContent && (
-                  <div className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <FileText className="w-5 h-5 text-primary-500" />
-                      <div>
-                        <p className="font-medium text-gray-900">产品需求文档（PRD）</p>
-                        <p className="text-xs text-gray-400">{productName}-PRD.md</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => downloadFile(`${productName}-PRD.md`, prdContent)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      下载
-                    </button>
-                  </div>
-                )}
-
-                {apiDocsContent && (
-                  <div className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <Code2 className="w-5 h-5 text-blue-500" />
-                      <div>
-                        <p className="font-medium text-gray-900">接口文档</p>
-                        <p className="text-xs text-gray-400">{productName}-API-Docs.md</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => downloadFile(`${productName}-API-Docs.md`, apiDocsContent)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      下载
-                    </button>
-                  </div>
-                )}
-
-                {promptsContent && (
-                  <div className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <Sparkles className="w-5 h-5 text-purple-500" />
-                      <div>
-                        <p className="font-medium text-gray-900">AI 提示词套件</p>
-                        <p className="text-xs text-gray-400">{productName}-Prompts.md</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => downloadFile(`${productName}-Prompts.md`, promptsContent)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      下载
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="text-center">
-                <button
-                  onClick={handleRestart}
-                  className="px-6 py-2.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  重新开始新项目
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
+      </div>
     </div>
   );
 }
-
-export default App;
