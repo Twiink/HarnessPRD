@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Loader2, FileText, Copy, Download, Check as CheckIcon } from 'lucide-react';
+import { Wand2, X, Loader2, Copy, Download, Check as CheckIcon } from 'lucide-react';
 import type { DocAction, PrdReviewResult, RunSummary } from '../types';
 import type { QualityGateResult } from '../types/qualityGate';
 import GenerationStepper, { type StepItem } from './GenerationStepper';
@@ -134,16 +134,15 @@ export default function DocumentReview({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
+    <div className="flex h-full min-h-0 flex-col bg-sheet">
       {/* 顶部栏 */}
-      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-6 py-3">
-        <div className="flex items-center gap-2">
-          <FileText className="w-5 h-5 text-primary-500" />
-          <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-hair px-6 py-3.5 lg:px-8">
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{title}</h2>
           {showHeaderLoader && (
-            <span className="flex items-center gap-1 text-sm text-primary-500">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              {isGeneratingPhase ? (generationStatusText || '生成中...') : '优化中...'}
+            <span className="flex items-center gap-1.5 text-sm text-primary-600">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              {isGeneratingPhase ? (generationStatusText || '正在生成') : '正在优化'}
             </span>
           )}
         </div>
@@ -152,16 +151,16 @@ export default function DocumentReview({
             type="button"
             onClick={handleCopy}
             disabled={!displayContent}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 disabled:opacity-30"
+            className="btn-quiet py-1.5"
           >
-            {copied ? <CheckIcon className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? <CheckIcon className="h-3.5 w-3.5 text-primary-600" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
             {copied ? '已复制' : '复制'}
           </button>
           <button
             type="button"
             onClick={handleDownload}
             disabled={!displayContent}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 disabled:opacity-30"
+            className="btn-quiet py-1.5"
           >
             <Download className="h-3.5 w-3.5" />
             下载
@@ -181,25 +180,26 @@ export default function DocumentReview({
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {isPreviewMode && previewLabel && onRestorePreview && (
-            <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-2">
-              <p className="text-sm text-amber-800">
-                正在预览 {previewLabel}，恢复后将保存为当前工作稿并保留历史记录
+            <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-stamp/30 bg-amber-50 px-6 py-2 lg:px-8">
+              <p className="text-sm text-amber-900">
+                正在查看 {previewLabel} 的版本。恢复后它会成为当前工作稿，原记录保留。
               </p>
               <button
                 type="button"
                 onClick={onRestorePreview}
                 disabled={isRestoring}
-                className="flex flex-shrink-0 items-center gap-1.5 rounded-md bg-primary-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="btn-primary py-1 text-xs"
               >
-                {isRestoring ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                恢复此记录
+                {isRestoring ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : null}
+                恢复此版本
               </button>
             </div>
           )}
 
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-5 lg:px-8">
           <textarea
-            className="min-h-[12rem] w-full flex-1 resize-none rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:bg-gray-50 disabled:text-gray-600"
+            aria-label={`${title}正文`}
+            className="min-h-[12rem] w-full flex-1 resize-none rounded border border-hair bg-white px-6 py-5 font-sans text-[14px] leading-[1.8] text-ink focus:border-primary-600 focus:outline-none focus:ring-1 focus:ring-primary-600 read-only:bg-slate-50 read-only:text-slate-700"
             value={displayContent}
             onChange={(e) => !isReadOnly && handleTextChange(e.target.value)}
             readOnly={isReadOnly}
@@ -227,15 +227,16 @@ export default function DocumentReview({
       </div>
 
       {/* 底部操作区 */}
-      <div className="flex-shrink-0 border-t border-gray-100 bg-white px-6 py-4">
+      <div className="flex-shrink-0 border-t-[1.5px] border-ink bg-sheet px-6 py-3.5 lg:px-8">
         {/* 优化输入框 */}
         {showOptimizeInput && !isReadOnly && (
           <div className="mb-3 flex gap-2">
             <textarea
               ref={optimizeInputRef}
               rows={2}
-              placeholder="描述你想如何优化这份文档，例如：让技术规格更详细..."
-              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-300"
+              aria-label="优化要求"
+              placeholder="写下要怎么改，例如：补充交易纠纷的处理流程"
+              className="flex-1 resize-none rounded border border-slate-300 bg-white px-3 py-2 text-sm text-ink placeholder:text-slate-400 focus:border-primary-600 focus:outline-none focus:ring-1 focus:ring-primary-600"
               value={optimizeInstruction}
               onChange={(e) => setOptimizeInstruction(e.target.value)}
               onKeyDown={(e) => {
@@ -249,15 +250,16 @@ export default function DocumentReview({
               <button
                 onClick={handleOptimizeSubmit}
                 disabled={!optimizeInstruction.trim()}
-                className="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="btn-primary py-1.5"
               >
-                确认
+                开始优化
               </button>
               <button
                 onClick={() => { setShowOptimizeInput(false); setOptimizeInstruction(''); }}
-                className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                className="btn-quiet py-1.5"
+                aria-label="取消优化"
               >
-                <X className="w-4 h-4 mx-auto" />
+                <X className="mx-auto h-4 w-4" aria-hidden />
               </button>
             </div>
           </div>
@@ -267,10 +269,11 @@ export default function DocumentReview({
           <button
             onClick={() => setShowOptimizeInput(!showOptimizeInput)}
             disabled={isReadOnly}
-            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-expanded={showOptimizeInput}
+            className="btn-quiet -ml-3"
           >
-            <Sparkles className="w-4 h-4" />
-            优化文档
+            <Wand2 className="h-4 w-4" aria-hidden />
+            按意见优化
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -279,14 +282,14 @@ export default function DocumentReview({
                 key={i}
                 onClick={action.onClick}
                 disabled={action.disabled || isReadOnly}
-                className={`max-w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`max-w-full ${
                   action.variant === 'primary'
-                    ? 'bg-primary-600 text-white hover:bg-primary-700'
+                    ? 'btn-primary'
                     : action.variant === 'secondary'
-                    ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'btn-outline'
                     : action.variant === 'link'
-                    ? 'px-2 text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline'
-                    : 'text-gray-500 hover:bg-gray-50 border border-gray-200'
+                    ? 'btn border-transparent px-2 text-slate-600 underline-offset-2 hover:text-ink hover:underline'
+                    : 'btn-quiet'
                 }`}
               >
                 {action.label}

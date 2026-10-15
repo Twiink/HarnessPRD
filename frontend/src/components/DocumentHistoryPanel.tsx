@@ -90,15 +90,15 @@ export default function DocumentHistoryPanel({
   const showReviewPanel = showReview && (isLoadingReview || shouldShowReviewPanel(review));
 
   return (
-    <div className="flex max-h-[40%] w-full shrink-0 flex-col border-t border-gray-100 bg-gray-50/80 lg:h-full lg:max-h-none lg:w-72 lg:border-l lg:border-t-0">
-      <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-gray-100 px-4 py-3">
-        <h3 className="text-sm font-semibold text-gray-800">历史记录</h3>
+    <div className="flex max-h-[30%] w-full shrink-0 flex-col border-t border-hair bg-sheet lg:h-full lg:max-h-none lg:w-80 lg:border-l-[1.5px] lg:border-t-0 lg:border-l-ink">
+      <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b-[1.5px] border-ink px-4 py-2.5">
+        <h3 className="text-[13px] font-semibold text-ink">版本记录</h3>
         {hasVersions && !isGenerating && (
           <button
             type="button"
             onClick={() => void onCheckpoint()}
             disabled={isCheckpointing || isLoadingPreview}
-            className="flex items-center gap-1 rounded-md bg-primary-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-outline px-2.5 py-1 text-xs"
           >
             {isCheckpointing ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
             保存快照
@@ -106,14 +106,14 @@ export default function DocumentHistoryPanel({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {error && (
-          <div className="mb-3 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <div className="m-3 rounded border border-mark/30 bg-red-50 px-3 py-2 text-xs text-mark">
             <p>{error}</p>
             <button
               type="button"
               onClick={() => void onRetry()}
-              className="mt-1 inline-flex items-center gap-1 text-red-800 underline-offset-2 hover:underline"
+              className="mt-1 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
             >
               <RefreshCw className="h-3 w-3" />
               重试
@@ -122,47 +122,45 @@ export default function DocumentHistoryPanel({
         )}
 
         {isLoading && versions.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-400">
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500">
             <Loader2 className="h-4 w-4 animate-spin" />
-            加载中...
+            正在加载
           </div>
         ) : !hasVersions ? (
-          <p className="py-8 text-center text-sm text-gray-400">暂无历史记录</p>
+          <p className="px-4 py-8 text-sm text-slate-500">还没有版本。文档生成或编辑后会自动记录。</p>
         ) : (
           <ul
-            className={`space-y-1 ${versionPanelLocked ? 'pointer-events-none opacity-90' : ''}`}
+            className={`${versionPanelLocked ? 'pointer-events-none opacity-90' : ''}`}
             aria-disabled={versionPanelLocked || undefined}
           >
             {generatingVersionNo != null && (
               <li
-                className={`rounded-lg transition-colors ${
-                  isGeneratingNewVersion
-                    ? 'bg-white shadow-sm ring-1 ring-primary-200'
-                    : 'bg-slate-100/90 opacity-70'
+                className={`border-b border-hair ${
+                  isGeneratingNewVersion ? 'bg-primary-50' : 'opacity-70'
                 }`}
               >
-                <div className="px-3 py-2.5">
+                <div className="px-4 py-2.5">
                   <div className="flex items-center gap-2">
                     <span
                       className={`h-2 w-2 flex-shrink-0 rounded-full ${
                         isGeneratingNewVersion
-                          ? 'animate-pulse bg-primary-500'
+                          ? 'animate-pulse bg-primary-600'
                           : 'animate-pulse bg-slate-400'
                       }`}
                     />
-                    <span className="text-sm font-medium text-gray-800">文档生成</span>
+                    <span className="font-cond text-[15px] font-semibold text-ink">v{generatingVersionNo}</span>
                     <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      className={`rounded-sm border px-1.5 text-[11px] font-medium leading-[18px] ${
                         isGeneratingNewVersion
-                          ? 'bg-primary-100 text-primary-700'
-                          : 'bg-slate-200 text-slate-500'
+                          ? 'border-primary-600 text-primary-700'
+                          : 'border-slate-300 text-slate-500'
                       }`}
                     >
                       {isGeneratingNewVersion ? '生成中' : '待生成'}
                     </span>
                   </div>
-                  <div className="mt-1 pl-4 text-xs text-slate-400">
-                    {isGeneratingNewVersion ? '左侧为实时生成内容' : '完成后可查看与编辑'}
+                  <div className="mt-1 pl-4 text-xs text-slate-500">
+                    {isGeneratingNewVersion ? '正文区显示实时内容' : '生成完成后可查看和编辑'}
                   </div>
                 </div>
               </li>
@@ -180,15 +178,17 @@ export default function DocumentHistoryPanel({
               return (
                 <li
                   key={version.id}
-                  className={`rounded-lg transition-colors ${
-                    isCurrent || isPreviewing
-                      ? 'bg-white shadow-sm ring-1 ring-primary-200'
-                      : versionPanelLocked
-                        ? ''
-                        : 'hover:bg-white/80'
+                  className={`border-b border-hair transition-colors ${
+                    isPreviewing
+                      ? 'bg-amber-50'
+                      : isCurrent
+                        ? 'bg-primary-50/70'
+                        : versionPanelLocked
+                          ? ''
+                          : 'hover:bg-slate-50'
                   }`}
                 >
-                  <div className="flex items-start gap-1 px-3 py-2.5">
+                  <div className="flex items-start gap-1 px-4 py-2.5">
                     <button
                       type="button"
                       onClick={() => void onSelectVersion(version.id)}
@@ -200,28 +200,27 @@ export default function DocumentHistoryPanel({
                       <div className="flex items-center gap-2">
                         <span
                           className={`h-2 w-2 flex-shrink-0 rounded-full ${
-                            isCurrent ? 'bg-primary-500' : 'bg-gray-300'
+                            isCurrent ? 'bg-primary-600' : 'bg-slate-300'
                           }`}
                         />
-                        <span className="text-sm font-medium text-gray-800">已保存文档</span>
+                        <span className="font-cond text-[15px] font-semibold text-ink">v{version.version_no}</span>
                         {isCurrent && (
-                          <span className="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-700">
+                          <span className="rounded-sm border border-primary-600 px-1.5 text-[11px] font-medium leading-[18px] text-primary-700">
                             当前
                           </span>
                         )}
                         {isPreviewing && !isCurrent && (
-                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                            预览中
+                          <span className="rounded-sm border border-stamp px-1.5 text-[11px] font-medium leading-[18px] text-stamp">
+                            查看中
                           </span>
                         )}
                       </div>
-                      <div className="mt-1 flex items-center gap-2 pl-4 text-xs text-gray-500">
+                      <div className="mt-0.5 flex items-center justify-between gap-2 pl-4 text-xs text-slate-500">
                         <span>{sourceLabel}</span>
-                        <span>·</span>
-                        <span>{formatDocumentHistoryTime(version.created_at)}</span>
+                        <span className="tabular-nums">{formatDocumentHistoryTime(version.created_at)}</span>
                       </div>
                       {savedNote && !isEditingNote && (
-                        <p className="mt-1.5 line-clamp-2 pl-4 text-xs leading-relaxed text-gray-600">
+                        <p className="mt-1 line-clamp-2 pl-4 text-xs leading-relaxed text-slate-700">
                           {savedNote}
                         </p>
                       )}
@@ -230,18 +229,16 @@ export default function DocumentHistoryPanel({
                       type="button"
                       onClick={() => openNoteEditor(version)}
                       disabled={isSavingNote || versionPanelLocked}
-                      className={`mt-0.5 flex-shrink-0 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-                        savedNote
-                          ? 'border-primary-300 bg-primary-50 text-primary-700 hover:bg-primary-100'
-                          : 'border-gray-300 bg-white text-gray-600 hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700'
-                      } disabled:opacity-50`}
+                      className={`mt-0.5 flex-shrink-0 rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-slate-100 hover:text-ink disabled:opacity-50 ${
+                        savedNote ? 'text-primary-700' : 'text-slate-500'
+                      }`}
                     >
                       备注
                     </button>
                   </div>
 
                   {isEditingNote && (
-                    <div className="border-t border-gray-100 px-3 pb-3 pt-2">
+                    <div className="px-4 pb-3">
                       <textarea
                         value={draftNote}
                         onChange={(event) => setDraftNote(event.target.value)}
@@ -249,14 +246,15 @@ export default function DocumentHistoryPanel({
                         rows={2}
                         maxLength={200}
                         disabled={isSavingNote}
-                        className="w-full resize-none rounded-md border border-gray-200 px-2.5 py-2 text-xs text-gray-800 placeholder:text-gray-400 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-200 disabled:opacity-60"
+                        aria-label="版本备注"
+                        className="w-full resize-none rounded border border-slate-300 bg-white px-2.5 py-2 text-xs text-ink placeholder:text-slate-400 focus:border-primary-600 focus:outline-none focus:ring-1 focus:ring-primary-600 disabled:opacity-60"
                       />
                       <div className="mt-2 flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={closeNoteEditor}
                           disabled={isSavingNote}
-                          className="rounded-md px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+                          className="btn-quiet px-2 py-1 text-xs"
                         >
                           取消
                         </button>
@@ -264,7 +262,7 @@ export default function DocumentHistoryPanel({
                           type="button"
                           onClick={() => handleSaveNote(version.id)}
                           disabled={isSavingNote}
-                          className="flex items-center gap-1 rounded-md bg-primary-600 px-2 py-1 text-xs font-medium text-white hover:bg-primary-700 disabled:opacity-50"
+                          className="btn-primary px-2 py-1 text-xs"
                         >
                           {isSavingNote ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                           保存
@@ -279,9 +277,9 @@ export default function DocumentHistoryPanel({
         )}
 
         {isLoadingPreview && (
-          <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
+          <div className="flex items-center gap-2 px-4 py-2 text-xs text-slate-500">
             <Loader2 className="h-3 w-3 animate-spin" />
-            加载预览...
+            正在载入版本
           </div>
         )}
       </div>
@@ -289,9 +287,9 @@ export default function DocumentHistoryPanel({
       {showReviewPanel && (
         <div className="flex max-h-[42%] min-h-0 flex-shrink-0 flex-col">
           {isLoadingReview ? (
-            <div className="flex items-center gap-2 border-t border-gray-200 bg-white px-4 py-3 text-xs text-gray-400">
+            <div className="flex items-center gap-2 border-t border-hair px-4 py-3 text-xs text-slate-500">
               <Loader2 className="h-3 w-3 animate-spin" />
-              {reviewVersionLabel ? `加载 ${reviewVersionLabel} 审查意见...` : '加载审查意见...'}
+              {reviewVersionLabel ? `正在载入 ${reviewVersionLabel} 的审查意见` : '正在载入审查意见'}
             </div>
           ) : review && shouldShowReviewPanel(review) ? (
             <ReviewResultPanel
@@ -306,9 +304,9 @@ export default function DocumentHistoryPanel({
       )}
 
       {(currentVersionNo !== null || isGeneratingNewVersion) && !showReviewPanel && (
-        <div className="flex-shrink-0 border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
+        <div className="flex-shrink-0 border-t border-hair px-4 py-2 text-xs text-slate-500">
           {isGeneratingNewVersion
-            ? '正在生成文档…'
+            ? '正在生成新版本'
             : '当前工作稿'}
         </div>
       )}

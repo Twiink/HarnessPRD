@@ -1,54 +1,47 @@
-import { Sparkles } from 'lucide-react';
 import ArtifactProgressBar from '../ArtifactProgressBar';
-import { PAGE_CLASS } from '../../constants/layout';
+import BrandMark from '../BrandMark';
 import type { ArtifactNode } from '../../utils/artifactProgress';
 
 type AppHeaderProps = {
   artifactNodes: ArtifactNode[];
+  projectName?: string;
   onGoSessionList: () => void;
   onResetPage: () => void;
 };
 
 export default function AppHeader({
   artifactNodes,
+  projectName,
   onGoSessionList,
   onResetPage,
 }: AppHeaderProps) {
   return (
-    <header className="z-20 flex-shrink-0 border-b border-slate-200 bg-white shadow-sm">
-      <div className={`${PAGE_CLASS} flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3`}>
-        <div className="flex shrink-0 items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white">
-            <Sparkles className="h-4 w-4" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-slate-900">Vibe Coding</div>
-            <div className="text-xs text-slate-500">结构化需求工作台</div>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-3 whitespace-nowrap">
-          <button
-            type="button"
-            onClick={onGoSessionList}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            我的方案
-          </button>
-          <button
-            type="button"
-            onClick={onResetPage}
-            title="清空本次任务的全部进度与内容"
-            className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:border-red-300 hover:bg-red-100"
-          >
-            结束当前任务
-          </button>
-        </div>
+    <header className="z-20 flex flex-shrink-0 flex-wrap items-stretch border-b-[1.5px] border-ink bg-sheet lg:h-[52px] lg:flex-nowrap">
+      <div className="flex h-[52px] shrink-0 items-center gap-4 px-5 text-ink lg:px-7">
+        <BrandMark />
+        {projectName && (
+          <span className="hidden max-w-[16rem] truncate border-l border-hair pl-4 text-[13px] text-slate-500 xl:block">
+            {projectName}
+          </span>
+        )}
       </div>
 
-      <div className="border-t border-slate-200/80 bg-white">
-        <div className={`${PAGE_CLASS} py-2`}>
-          <ArtifactProgressBar nodes={artifactNodes} />
-        </div>
+      <div className="order-last flex h-11 w-full min-w-0 items-stretch border-t border-hair lg:order-none lg:h-auto lg:w-auto lg:flex-1 lg:border-t-0">
+        <ArtifactProgressBar nodes={artifactNodes} />
+      </div>
+
+      <div className="ml-auto flex h-[52px] shrink-0 items-center gap-1 px-3 lg:px-5">
+        <button type="button" onClick={onGoSessionList} className="btn-quiet">
+          我的方案
+        </button>
+        <button
+          type="button"
+          onClick={onResetPage}
+          title="清空本次任务的全部进度与内容"
+          className="btn-quiet hover:text-mark"
+        >
+          结束任务
+        </button>
       </div>
     </header>
   );

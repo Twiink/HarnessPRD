@@ -1,5 +1,5 @@
 import { useState, useRef, KeyboardEvent } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { ArrowUp, Loader2 } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -23,7 +23,7 @@ export default function ChatInput({ onSend, loading, disabled, placeholder }: Ch
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -37,36 +37,31 @@ export default function ChatInput({ onSend, loading, disabled, placeholder }: Ch
   };
 
   return (
-    <div className="border-t border-gray-100 bg-white p-4">
-      <div className="flex items-end gap-3 max-w-4xl mx-auto">
-        <div className="flex-1 relative">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onInput={handleInput}
-            placeholder={placeholder || '输入你的想法... (Enter 发送，Shift+Enter 换行)'}
-            disabled={disabled || loading}
-            rows={1}
-            className="w-full resize-none rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
-          />
-        </div>
+    <div className="mx-auto max-w-3xl">
+      <div className="flex items-end gap-2 rounded border border-slate-300 bg-white p-1.5 focus-within:border-primary-600 focus-within:ring-1 focus-within:ring-primary-600">
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onInput={handleInput}
+          aria-label="回答或补充"
+          placeholder={placeholder || '回答问题，或补充你想到的需求'}
+          disabled={disabled || loading}
+          rows={1}
+          className="min-h-[40px] flex-1 resize-none bg-transparent px-2.5 py-2 text-[15px] leading-relaxed text-ink placeholder:text-slate-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        />
         <button
+          type="button"
           onClick={handleSend}
           disabled={!input.trim() || loading || disabled}
-          className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary-600 text-white flex items-center justify-center hover:bg-primary-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          aria-label="发送"
+          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-primary-600 text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {loading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <Send className="w-5 h-5" />
-          )}
+          {loading ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <ArrowUp className="h-5 w-5" aria-hidden />}
         </button>
       </div>
-      <p className="text-center text-xs text-gray-400 mt-2">
-        Enter 发送 · Shift+Enter 换行
-      </p>
+      <p className="mt-1.5 text-xs text-slate-500">Enter 发送，Shift + Enter 换行</p>
     </div>
   );
 }

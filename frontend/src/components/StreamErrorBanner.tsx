@@ -1,3 +1,5 @@
+import { AlertCircle } from 'lucide-react';
+
 type StreamErrorBannerProps = {
   message: string;
   requestId?: string | null;
@@ -15,18 +17,22 @@ export default function StreamErrorBanner({
 
   return (
     <div
-      className={`rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 ${className}`}
+      role="alert"
+      className={`flex items-start gap-2.5 rounded border border-mark/40 bg-red-50 px-4 py-3 text-sm text-mark ${className}`}
     >
-      <div>{message}</div>
-      {requestId && onCopyRequestId && (
-        <button
-          type="button"
-          onClick={() => onCopyRequestId()}
-          className="mt-2 text-xs font-medium text-red-800 underline underline-offset-2 hover:text-red-900"
-        >
-          复制请求 ID
-        </button>
-      )}
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+      <div>
+        <div>{message}</div>
+        {requestId && onCopyRequestId && (
+          <button
+            type="button"
+            onClick={() => onCopyRequestId()}
+            className="mt-1.5 text-xs font-medium underline underline-offset-2 hover:no-underline"
+          >
+            复制请求 ID，便于排查
+          </button>
+        )}
+      </div>
     </div>
   );
 }

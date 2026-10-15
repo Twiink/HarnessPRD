@@ -217,7 +217,7 @@ export function readinessStatusLabel(result: ReadinessResult): string {
 }
 
 export function readinessScoreClass(score: number, hasBlockers: boolean): string {
-  if (hasBlockers || score < 60) return 'text-red-700 bg-red-50';
-  if (score < 80) return 'text-amber-700 bg-amber-50';
-  return 'text-emerald-700 bg-emerald-50';
+  if (hasBlockers || score < 60) return 'border border-mark text-mark';
+  if (score < 80) return 'border border-stamp text-stamp';
+  return 'border border-primary-600 text-primary-700';
 }

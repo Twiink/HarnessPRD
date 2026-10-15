@@ -77,7 +77,7 @@ export function assessClarificationState(
 
 export function clarificationStatusClass(state: ClarificationState): string {
   if (!state.needsConfirmBeforeGenerate && state.status === 'ready') {
-    return 'text-emerald-700 bg-emerald-50';
+    return 'border-primary-600 text-primary-700';
   }
-  return 'text-amber-700 bg-amber-50';
+  return 'border-stamp text-stamp';
 }

@@ -44,7 +44,7 @@ export default function FormEntryStage({
 }: FormEntryStageProps) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <main className={`${PAGE_CLASS} py-8`}>
+      <main className={`${PAGE_CLASS} py-10`}>
         {formSubView === 'chooser' && (
           <ProjectEntryChooser
             onSelectStructured={onSelectStructured}

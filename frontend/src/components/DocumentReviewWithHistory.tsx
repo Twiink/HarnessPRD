@@ -161,7 +161,7 @@ export default function DocumentReviewWithHistory({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {(renderedHeaderBanner || staleWarnings.length > 0) && (
-        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4">
+        <div className="shrink-0 space-y-3 border-b border-hair bg-sheet px-6 py-3 lg:px-8">
           {renderedHeaderBanner}
           <StaleArtifactBanner warnings={staleWarnings} />
         </div>

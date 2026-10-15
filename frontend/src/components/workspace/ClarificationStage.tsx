@@ -39,7 +39,6 @@ export default function ClarificationStage({
   clarificationState,
   obs,
   onBackToForm,
-  onResetPage,
   onSyncSummary,
   onSendMessage,
 }: ClarificationStageProps) {
@@ -108,16 +107,16 @@ export default function ClarificationStage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex-shrink-0 border-b border-slate-200 bg-white py-3">
+      <div className="flex-shrink-0 border-b border-hair bg-sheet py-3">
         <div className={`${PAGE_CLASS} flex flex-wrap items-center justify-between gap-3`}>
           <div className="min-w-0 flex flex-wrap items-center gap-3">
             <div>
-              <div className="text-sm font-medium text-slate-900">澄清对话</div>
-              <div className="text-xs text-slate-500">AI 会围绕结构化摘要补齐不清晰项</div>
+              <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-ink">澄清需求</h1>
+              <div className="text-xs text-slate-500">逐个回答问题，答案会在生成 PRD 前回填到需求里</div>
             </div>
             {clarificationState.statusLabel && (
               <span
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${clarificationStatusClass(
+                className={`rounded-sm border px-2 text-xs font-medium leading-[22px] ${clarificationStatusClass(
                   clarificationState,
                 )}`}
               >
@@ -129,31 +128,20 @@ export default function ClarificationStage({
             <button
               type="button"
               onClick={onBackToForm}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+              className="btn-quiet"
             >
-              返回表单
-            </button>
-            <button
-              type="button"
-              onClick={onResetPage}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
-            >
-              结束任务
+              返回需求表
             </button>
             <button
               type="button"
               onClick={handleGenerateClick}
               disabled={generateDisabled}
               title={
-                generateWarn ? '仍有待澄清问题，点击后将提示确认' : undefined
+                generateWarn ? '还有问题没回答，点击后会先让你确认' : undefined
               }
-              className={`rounded-lg px-3 py-2 text-xs font-medium text-white disabled:opacity-50 ${
-                generateWarn
-                  ? 'border border-amber-400 bg-amber-600 hover:bg-amber-700'
-                  : 'bg-slate-900 hover:bg-slate-800'
-              }`}
+              className={generateWarn ? 'btn-outline' : 'btn-primary'}
             >
-              {isSyncingSummary ? '分析对话中…' : generateWarn ? '生成 PRD ⚠' : '生成 PRD'}
+              {isSyncingSummary ? '正在整理对话' : '结束澄清，生成 PRD'}
             </button>
           </div>
         </div>
@@ -162,7 +150,7 @@ export default function ClarificationStage({
       <div
         ref={chatScrollRef}
         onScroll={handleChatScroll}
-        className="min-h-0 flex-1 overflow-y-auto bg-slate-50/40"
+        className="min-h-0 flex-1 overflow-y-auto bg-sheet"
       >
         <div className={PAGE_CLASS}>
           <MessageList messages={displayMessages} loading={isStreaming && streamingContent === ''} />
@@ -170,9 +158,11 @@ export default function ClarificationStage({
         </div>
       </div>
 
-      <div className="flex-shrink-0 border-t border-slate-200 bg-white pb-4 pt-3">
+      <div className="flex-shrink-0 border-t-[1.5px] border-ink bg-sheet pb-4 pt-3">
         <div className={PAGE_CLASS}>
-          <ClarificationContextPanel rounds={obs.clarificationRounds} />
+          <div className="mx-auto max-w-3xl">
+            <ClarificationContextPanel rounds={obs.clarificationRounds} />
+          </div>
           <ClarificationWarnBanner
             visible={obs.contextUsage?.level === 'warn' || obs.contextUsage?.level === 'exceed'}
           />

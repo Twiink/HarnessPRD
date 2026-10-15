@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Trash2, FileText, Plus } from 'lucide-react';
+import { Loader2, Plus, Trash2 } from 'lucide-react';
 import {
   deleteSession,
   listSessions,
   type SessionSummary,
 } from '../services/sessionService';
-
-import { PAGE_CLASS } from '../constants/layout';
+import BrandMark from './BrandMark';
 
 const ENTRY_MODE_LABELS: Record<string, string> = {
-  structured: '从零创建',
+  structured: '从零整理',
   prd: '导入 PRD',
-  prompts: '导入 PRD+接口文档',
+  prompts: '导入 PRD + 接口文档',
 };
 
 function formatDateTime(value: string): string {
@@ -47,7 +46,7 @@ export default function SessionList() {
   }, [fetchList]);
 
   const handleDelete = async (id: string, title: string) => {
-    if (!window.confirm(`确定删除方案「${title}」？此操作不可恢复。`)) return;
+    if (!window.confirm(`确定删除方案「${title}」？删除后无法恢复。`)) return;
     setDeletingId(id);
     const ok = await deleteSession(id);
     setDeletingId(null);
@@ -57,91 +56,113 @@ export default function SessionList() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white shadow-sm">
-        <div className={`${PAGE_CLASS} flex items-center justify-between gap-4 py-3`}>
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white">
-              <Sparkles className="h-4 w-4" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-slate-900">我的方案</div>
-              <div className="text-xs text-slate-500">已保存的需求收集方案</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              <Plus className="h-4 w-4" />
-              新建方案
-            </button>
-          </div>
-        </div>
+    <div className="min-h-screen bg-ground">
+      <header className="flex h-[52px] items-center justify-between border-b-[1.5px] border-ink bg-sheet px-5 text-ink lg:px-7">
+        <button type="button" onClick={() => navigate('/')} className="rounded" aria-label="返回工作台">
+          <BrandMark />
+        </button>
+        <button type="button" onClick={() => navigate('/')} className="btn-primary">
+          <Plus className="h-4 w-4" aria-hidden />
+          新建方案
+        </button>
       </header>
 
-      <main className={`${PAGE_CLASS} py-8`}>
-        {loading ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-500">
-            加载中…
+      <main className="mx-auto w-full max-w-6xl px-5 py-10 lg:px-8">
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div>
+            <h1 className="text-[28px] font-semibold tracking-[-0.02em] text-ink">我的方案</h1>
+            <p className="mt-1 text-sm text-slate-600">方案在工作过程中自动保存。</p>
           </div>
-        ) : items.length === 0 ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
-            <FileText className="mx-auto h-10 w-10 text-slate-300" />
-            <p className="mt-4 text-sm font-medium text-slate-700">还没有保存的方案</p>
-            <p className="mt-2 text-sm text-slate-500">
-              前往工作台开始澄清对话或生成文档后，方案会自动保存到这里。
-            </p>
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="mt-6 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
-            >
-              去新建方案
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {items.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-base font-semibold text-slate-900">{item.title}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                    <span>
-                      入口：{ENTRY_MODE_LABELS[item.entry_mode || ''] || item.entry_mode || '未知'}
-                    </span>
-                    <span>阶段：{item.current_stage || '未知'}</span>
-                    {item.status && <span>状态：{item.status}</span>}
-                    <span>更新于 {formatDateTime(item.updated_at)}</span>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/projects/${item.id}`)}
-                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    继续编辑
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(item.id, item.title)}
-                    disabled={deletingId === item.id}
-                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    删除
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+          {!loading && items.length > 0 && (
+            <span className="font-cond text-sm font-medium text-slate-500">共 {items.length} 份</span>
+          )}
+        </div>
+
+        <div className="sheet">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 px-6 py-16 text-sm text-slate-600">
+              <Loader2 className="h-4 w-4 animate-spin text-primary-600" aria-hidden />
+              正在加载
+            </div>
+          ) : items.length === 0 ? (
+            <div className="px-6 py-16 lg:px-10">
+              <p className="text-base font-semibold text-ink">还没有方案</p>
+              <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-600">
+                在工作台开始整理需求或导入文档后，方案会出现在这里。
+              </p>
+              <button type="button" onClick={() => navigate('/')} className="btn-primary mt-6">
+                新建方案
+              </button>
+            </div>
+          ) : (
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b-[1.5px] border-ink text-left text-xs text-slate-500">
+                  <th scope="col" className="px-6 py-3 font-medium">方案</th>
+                  <th scope="col" className="hidden px-4 py-3 font-medium md:table-cell">起点</th>
+                  <th scope="col" className="hidden px-4 py-3 font-medium md:table-cell">当前阶段</th>
+                  <th scope="col" className="hidden px-4 py-3 font-medium lg:table-cell">更新时间</th>
+                  <th scope="col" className="px-6 py-3 text-right font-medium">
+                    <span className="sr-only">操作</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.id} className="group border-b border-hair last:border-b-0 hover:bg-primary-50/50">
+                    <td className="px-6 py-4">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/projects/${item.id}`)}
+                        className="text-left text-[15px] font-semibold text-ink hover:text-primary-700 hover:underline"
+                      >
+                        {item.title}
+                      </button>
+                      <div className="mt-0.5 text-xs text-slate-500 md:hidden">
+                        {item.current_stage || '未开始'}，{formatDateTime(item.updated_at)}
+                      </div>
+                    </td>
+                    <td className="hidden px-4 py-4 text-slate-600 md:table-cell">
+                      {ENTRY_MODE_LABELS[item.entry_mode || ''] || item.entry_mode || '未知'}
+                    </td>
+                    <td className="hidden px-4 py-4 md:table-cell">
+                      <span className="text-ink">{item.current_stage || '未开始'}</span>
+                      {item.status && <span className="ml-2 text-xs text-slate-500">{item.status}</span>}
+                    </td>
+                    <td className="hidden px-4 py-4 tabular-nums text-slate-600 lg:table-cell">
+                      {formatDateTime(item.updated_at)}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/projects/${item.id}`)}
+                          className="btn-outline py-1.5"
+                        >
+                          继续
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDelete(item.id, item.title)}
+                          disabled={deletingId === item.id}
+                          className="btn-quiet px-2 py-1.5 hover:text-mark"
+                          aria-label={`删除方案 ${item.title}`}
+                          title="删除"
+                        >
+                          {deletingId === item.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                          ) : (
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          )}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </main>
     </div>
   );

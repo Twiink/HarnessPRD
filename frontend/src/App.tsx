@@ -706,7 +706,7 @@ export default function App() {
         disabled: jobGen.isOptimizingJob || !promptsGate.allowed,
       },
       {
-        label: '生成接口文档 →',
+        label: '生成接口文档',
         variant: 'primary',
         onClick: () => void generateApiDocs(prdContent),
         disabled: jobGen.isOptimizingJob || !apiDocsGate.allowed,
@@ -849,9 +849,10 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
+    <div className="flex h-screen flex-col overflow-hidden bg-ground">
       <AppHeader
         artifactNodes={artifactNodes}
+        projectName={formData.product_name.trim() || requirementsSummary?.product_name?.trim() || undefined}
         onGoSessionList={() => void goToSessionList()}
         onResetPage={() => void resetPage()}
       />
@@ -1020,7 +1021,7 @@ export default function App() {
                     disabled: jobGen.isOptimizingJob,
                   },
                   {
-                    label: '生成提示词 →',
+                    label: '生成提示词',
                     variant: 'primary',
                     onClick: () => void generatePrompts(prdContent, apiDocsContent),
                     disabled: jobGen.isOptimizingJob || !promptsGate.allowed,

@@ -9,10 +9,10 @@ type UiPageRowEditorProps = {
 };
 
 function inputClass(invalid?: boolean) {
-  return `w-full rounded-lg border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 ${
+  return `w-full rounded border bg-white px-3 py-2 text-sm text-ink placeholder:text-slate-400 focus:outline-none focus:ring-1 ${
     invalid
-      ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-      : 'border-slate-300 focus:border-slate-500 focus:ring-slate-500'
+      ? 'border-mark/60 focus:border-mark focus:ring-mark'
+      : 'border-slate-300 focus:border-primary-600 focus:ring-primary-600'
   }`;
 }
 
@@ -38,7 +38,7 @@ export default function UiPageRowEditor({ rows, onChange, error }: UiPageRowEdit
       {rows.map((row, index) => (
         <div
           key={index}
-          className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 lg:grid-cols-[1fr_1fr_1fr_auto]"
+          className="grid gap-3 border-t border-hair pt-3 first:border-t-0 first:pt-0 lg:grid-cols-[1fr_1fr_1fr_auto]"
         >
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-600">页面名称</label>
@@ -71,7 +71,7 @@ export default function UiPageRowEditor({ rows, onChange, error }: UiPageRowEdit
             <button
               type="button"
               onClick={() => removeRow(index)}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-2 text-xs text-slate-500 hover:bg-slate-200 hover:text-red-600"
+              className="inline-flex items-center gap-1 rounded px-2 py-2 text-xs text-slate-500 hover:bg-slate-100 hover:text-mark"
               title="删除此行"
             >
               <Trash2 className="h-4 w-4" />
@@ -83,12 +83,12 @@ export default function UiPageRowEditor({ rows, onChange, error }: UiPageRowEdit
       <button
         type="button"
         onClick={addRow}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+        className="inline-flex items-center gap-1.5 rounded border border-dashed border-slate-400 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-primary-600 hover:text-primary-700"
       >
         <Plus className="h-4 w-4" />
         添加页面
       </button>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-mark">{error}</p>}
     </div>
   );
 }

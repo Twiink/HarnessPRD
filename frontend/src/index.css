@@ -4,20 +4,107 @@
 
 @layer base {
   html {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    @apply font-sans text-ink antialiased;
+    font-feature-settings: 'tnum' 1;
   }
 
   body {
-    @apply bg-gray-50;
+    @apply bg-ground;
+  }
+
+  ::selection {
+    background: #b8cfec;
+    color: #12345a;
+  }
+
+  :focus-visible {
+    outline: 2px solid #1f5fa8;
+    outline-offset: 2px;
+  }
+
+  textarea,
+  input {
+    caret-color: #1f5fa8;
+  }
+
+  a {
+    text-underline-offset: 3px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #bcc6d0 transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #bcc6d0;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #8a99a8;
   }
 }
 
-/* 流畅滚动 */
+@layer components {
+  /* 图纸：浅色纸面 + 外框线 + 内衬细框 */
+  .sheet {
+    @apply relative border-[1.5px] border-ink bg-sheet;
+  }
+
+  .sheet::before {
+    content: '';
+    @apply pointer-events-none absolute inset-[5px] border border-hair;
+  }
+
+  /* 标题栏格子的小标签 */
+  .tb-label {
+    @apply block text-[11px] leading-4 text-slate-500;
+  }
+
+  .tb-value {
+    @apply block text-[13.5px] font-semibold leading-5 text-ink;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded border px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn border-primary-600 bg-primary-600 text-white hover:border-primary-700 hover:bg-primary-700;
+  }
+
+  .btn-outline {
+    @apply btn border-ink bg-sheet text-ink hover:bg-slate-100;
+  }
+
+  .btn-quiet {
+    @apply btn border-transparent bg-transparent text-slate-600 hover:border-hair hover:bg-slate-100 hover:text-ink;
+  }
+
+  .btn-danger {
+    @apply btn border-mark/40 bg-sheet text-mark hover:border-mark hover:bg-red-50;
+  }
+}
+
 * {
   scroll-behavior: smooth;
 }
 
-/* prose 样式覆盖 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 .prose {
   max-width: none;
 }
@@ -26,7 +113,6 @@
   color: inherit;
 }
 
-/* 聊天容器自动滚动 */
 .message-container {
   scroll-snap-type: y proximity;
 }

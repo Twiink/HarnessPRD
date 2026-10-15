@@ -8,6 +8,8 @@ import {
   getReviewStatusBadge,
 } from '../utils/prdReviewDisplay';
 
+const SEVERITY_LABELS: Record<string, string> = { high: '高', medium: '中', low: '低' };
+
 type ReviewResultPanelProps = {
   review: PrdReviewResult | null | undefined;
   versionLabel?: string;
@@ -34,75 +36,78 @@ export default function ReviewResultPanel({
   const subtitle = getReviewPanelSubtitle(revisionApplied);
 
   return (
-    <div className={`flex flex-col border-t border-gray-200 bg-white ${className}`}>
+    <div className={`flex flex-col border-t-[1.5px] border-ink bg-sheet ${className}`}>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full flex-shrink-0 items-start gap-1.5 px-4 py-2.5 text-left transition-colors hover:bg-gray-50"
+        aria-expanded={expanded}
+        className="flex w-full flex-shrink-0 items-start gap-1.5 px-4 py-2.5 text-left transition-colors hover:bg-slate-50"
       >
         {expanded ? (
-          <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
+          <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
         ) : (
-          <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
+          <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-gray-700">{title}</span>
+            <span className="text-[13px] font-semibold text-ink">{title}</span>
             <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge.className}`}
+              className={`shrink-0 rounded-sm px-1.5 text-[11px] font-medium leading-[18px] ${statusBadge.className}`}
             >
               {statusBadge.label}
             </span>
           </div>
-          <p className="mt-0.5 text-[10px] leading-relaxed text-gray-400">{subtitle}</p>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{subtitle}</p>
           {!expanded && (
-            <p className="mt-0.5 text-xs text-gray-500">{collapsedText}</p>
+            <p className="mt-0.5 text-xs text-slate-600">{collapsedText}</p>
           )}
         </div>
       </button>
 
       {expanded && (
-        <div className="min-h-0 flex-1 overflow-y-auto border-t border-gray-100 px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto border-t border-hair px-4 py-3">
           {revisionApplied && (
-            <div className="mb-3 rounded-md border border-sky-100 bg-sky-50 px-3 py-2 text-[11px] leading-relaxed text-sky-900">
-              系统已根据下列意见自动修订 PRD。这些问题针对修订前初稿，当前正文可能已部分或全部解决，请通读正文后自行判断。
+            <div className="mb-3 rounded border border-primary-200 bg-primary-50 px-3 py-2 text-xs leading-relaxed text-primary-900">
+              PRD 已按下列意见自动修订过一次。这些问题针对修订前的初稿，当前正文可能已经解决，请通读后判断。
             </div>
           )}
 
           {review.summary && (
-            <p className="text-xs leading-relaxed text-gray-600">{review.summary}</p>
+            <p className="text-xs leading-relaxed text-slate-700">{review.summary}</p>
           )}
 
           {meaningfulIssues.length > 0 && (
-            <div className="mt-2 space-y-2">
+            <div className="mt-2">
               {revisionApplied && (
-                <p className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                <p className="mb-1 text-xs text-slate-500">
                   修订前问题
                 </p>
               )}
               {meaningfulIssues.map((issue, index) => (
                 <div
                   key={`${issue.section}-${index}`}
-                  className="rounded-md border border-gray-100 bg-gray-50 p-2.5"
+                  className="grid grid-cols-[26px_1fr] gap-2 border-b border-dashed border-hair py-2.5 last:border-b-0"
                 >
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                        issue.severity === 'high'
-                          ? 'bg-red-100 text-red-700'
-                          : issue.severity === 'medium'
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-slate-100 text-slate-600'
-                      }`}
-                    >
-                      {issue.severity.toUpperCase()}
-                    </span>
-                    <span className="text-[10px] text-gray-500">{issue.section}</span>
+                  <span
+                    className={`mt-0.5 grid h-[22px] w-[22px] place-items-center rounded-full border-[1.5px] font-cond text-xs font-semibold ${
+                      issue.severity === 'high'
+                        ? 'border-mark text-mark'
+                        : issue.severity === 'medium'
+                          ? 'border-stamp text-stamp'
+                          : 'border-slate-400 text-slate-500'
+                    }`}
+                    title={SEVERITY_LABELS[issue.severity] ?? issue.severity}
+                  >
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-slate-500">
+                      <span className="font-medium">{SEVERITY_LABELS[issue.severity] ?? issue.severity}</span>
+                      <span>{issue.section}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs leading-relaxed text-ink">{issue.problem}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600">建议：{issue.suggestion}</p>
                   </div>
-                  <p className="mt-1.5 text-xs leading-relaxed text-gray-800">{issue.problem}</p>
-                  <p className="mt-1 text-xs leading-relaxed text-gray-500">
-                    建议：{issue.suggestion}
-                  </p>
                 </div>
               ))}
             </div>

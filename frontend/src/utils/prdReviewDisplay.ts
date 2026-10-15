@@ -51,18 +51,18 @@ export function getReviewStatusBadge(
   if (revisionApplied) {
     return {
       label: '已自动修订',
-      className: 'bg-sky-100 text-sky-700',
+      className: 'border border-primary-600 text-primary-700',
     };
   }
   if (review.passed) {
     return {
       label: '已通过',
-      className: 'bg-green-100 text-green-700',
+      className: 'border border-primary-600 text-primary-700',
     };
   }
   return {
     label: '待改进',
-    className: 'bg-amber-100 text-amber-700',
+    className: 'border border-stamp text-stamp',
   };
 }
 

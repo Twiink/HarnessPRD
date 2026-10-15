@@ -1,4 +1,4 @@
-import { MessageSquare } from 'lucide-react';
+import { ArrowLeft, MessageSquare } from 'lucide-react';
 import FeatureRowEditor from '../structured-form/FeatureRowEditor';
 import UiPageRowEditor from '../structured-form/UiPageRowEditor';
 import FormTemplatePicker from '../structured-form/FormTemplatePicker';
@@ -46,36 +46,39 @@ export default function StructuredRequirementsForm({
   onStartClarification,
 }: StructuredRequirementsFormProps) {
   return (
-    <>
-      <div className="mb-6">
-        <button
-          type="button"
-          onClick={onBack}
-          className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900"
-        >
-          ← 返回路径选择
-        </button>
-        <h1 className="text-2xl font-semibold text-slate-900">结构化需求录入</h1>
-        <p className="mt-2 text-sm leading-relaxed text-slate-500">
-          填写结构化表单后进入澄清对话，逐步生成 PRD 与下游文档。
-        </p>
-        <div className="mt-3">
-          <FormTemplatePicker
-            selectedTemplateId={selectedTemplateId}
-            onSelectTemplate={onSelectTemplate}
-            onClear={onClearForm}
-            hasFormContent={hasFormContent}
-          />
-          {isTemplateFilled && selectedTemplateId && (
-            <p className="mt-2 text-xs text-slate-400">
-              当前表单与「{getTemplateById(selectedTemplateId)?.label}」模板一致
-            </p>
-          )}
+    <div className="mx-auto max-w-5xl">
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-6 inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-ink"
+      >
+        <ArrowLeft className="h-4 w-4" aria-hidden />
+        返回起点选择
+      </button>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-semibold tracking-[-0.02em] text-ink">整理需求</h1>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-600">
+            先写下你已经确定的内容，不确定的可以留空，下一步的澄清对话会逐项追问。
+          </p>
         </div>
       </div>
+      <div className="mb-4">
+        <FormTemplatePicker
+          selectedTemplateId={selectedTemplateId}
+          onSelectTemplate={onSelectTemplate}
+          onClear={onClearForm}
+          hasFormContent={hasFormContent}
+        />
+        {isTemplateFilled && selectedTemplateId && (
+          <p className="mt-2 text-xs text-slate-500">
+            当前内容来自示例「{getTemplateById(selectedTemplateId)?.label}」，可以直接修改。
+          </p>
+        )}
+      </div>
 
-      <div className="w-full space-y-4">
-        <FormCollapsibleSection title="产品与用户" description="名称、目标、用户与平台" defaultOpen>
+      <div className="sheet">
+        <FormCollapsibleSection index={1} title="产品与用户" description="名称、目标、用户与平台" defaultOpen>
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
               <FieldLabel title="产品名称" />
@@ -124,7 +127,7 @@ export default function StructuredRequirementsForm({
           </div>
         </FormCollapsibleSection>
 
-        <FormCollapsibleSection title="功能与页面" description="功能清单、页面结构与关键交互" defaultOpen>
+        <FormCollapsibleSection index={2} title="功能与页面" description="功能清单、页面结构与关键交互" defaultOpen>
           <div>
             <FieldLabel title="产品功能" hint="点击添加行，填写功能名称、描述与用户价值" />
             <FeatureRowEditor
@@ -151,7 +154,7 @@ export default function StructuredRequirementsForm({
           </div>
         </FormCollapsibleSection>
 
-        <FormCollapsibleSection title="设计与体验" description="视觉主题与响应式要求" defaultOpen={false}>
+        <FormCollapsibleSection index={3} title="设计与体验" description="视觉主题与响应式要求" defaultOpen={false}>
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
               <FieldLabel title="视觉主题" />
@@ -174,7 +177,7 @@ export default function StructuredRequirementsForm({
           </div>
         </FormCollapsibleSection>
 
-        <FormCollapsibleSection title="技术约束" description="认证、存储、前后端与部署" defaultOpen={false}>
+        <FormCollapsibleSection index={4} title="技术约束" description="认证、存储、前后端与部署" defaultOpen={false}>
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
               <FieldLabel title="用户认证" />
@@ -234,7 +237,7 @@ export default function StructuredRequirementsForm({
           </div>
         </FormCollapsibleSection>
 
-        <FormCollapsibleSection title="非功能与范围" description="安全、性能、可用性与项目边界" defaultOpen={false}>
+        <FormCollapsibleSection index={5} title="非功能与范围" description="安全、性能、可用性与项目边界" defaultOpen={false}>
           <div className="grid gap-5 lg:grid-cols-3">
             <div>
               <FieldLabel title="安全要求" hint="每行一条" />
@@ -286,18 +289,18 @@ export default function StructuredRequirementsForm({
         </FormCollapsibleSection>
       </div>
 
-      <div className="mt-6 flex flex-col gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-slate-500">填写完成后进入澄清对话，AI 将围绕结构化摘要补齐缺失信息。</p>
+      <div className="sticky bottom-0 mt-6 flex flex-col gap-3 border-t-[1.5px] border-ink bg-ground/95 py-4 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-slate-600">下一步：AI 会根据这份需求追问缺失的信息。</p>
         <button
           type="button"
           onClick={onStartClarification}
           disabled={actionLocked}
-          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 disabled:opacity-50"
+          className="btn-primary px-5 py-2.5"
         >
-          <MessageSquare className="h-4 w-4" />
+          <MessageSquare className="h-4 w-4" aria-hidden />
           开始澄清对话
         </button>
       </div>
-    </>
+    </div>
   );
 }
