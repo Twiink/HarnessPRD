@@ -2,6 +2,7 @@ import type { Message } from '../types';
 import type { ProjectSessionData } from '../services/sessionService';
 import { buildRequirementsSummary, normalizeFormData } from './structuredFormTransform';
 
+// 沿用旧键名，避免改名后用户浏览器中未保存的草稿丢失
 const BROWSER_DRAFT_KEY = 'vibecoding_session';
 
 /** 从浏览器草稿恢复需求与文档；保存到方案后才清理来源。 */

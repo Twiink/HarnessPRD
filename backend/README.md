@@ -1,4 +1,4 @@
-# HarnessPRD 后端
+# ReqFlow 后端
 
 单机 FastAPI 服务，SQLite 保存会话、文档版本、任务和事件。应用只在 lifespan 启动时加载配置、迁移数据库并恢复任务。
 

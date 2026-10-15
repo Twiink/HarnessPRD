@@ -145,7 +145,7 @@ def test_application_starts_and_serves_project_routes(isolated_database):
 
     with TestClient(app) as client:
         assert client.get("/health").json() == {"status": "healthy"}
-        assert client.get("/").json() == {"message": "Vibe Coding API 运行中"}
+        assert client.get("/").json() == {"message": "ReqFlow API 运行中"}
         assert "/api/sessions" in client.get("/openapi.json").json()["paths"]
         response = client.post(
             "/api/session/save",

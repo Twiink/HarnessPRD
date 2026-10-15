@@ -23,7 +23,7 @@ def create_app(settings: Settings | None = None, executor: Executor | None = Non
 
     @app.get("/", include_in_schema=False)
     async def root():
-        return {"message": "Vibe Coding API 运行中"}
+        return {"message": "ReqFlow API 运行中"}
 
     @app.get("/health", include_in_schema=False)
     @app.get("/api/health/live", tags=["health"])
