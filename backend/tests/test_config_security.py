@@ -186,7 +186,7 @@ def test_factory_unwraps_secrets_only_for_provider_clients(tmp_path, monkeypatch
 
 
 def test_skill_cache_is_scoped_to_root_and_config_path(tmp_path):
-    from apps.services.skill_loader import load_skill_bundle
+    from apps.core.resources.skill_loader import load_skill_bundle
 
     for name in ("one", "two"):
         root = tmp_path / name
@@ -205,7 +205,7 @@ def test_skill_cache_is_scoped_to_root_and_config_path(tmp_path):
 
 
 def test_skill_paths_cannot_escape_configured_root(tmp_path):
-    from apps.services.skill_loader import load_skill_manifest, read_artifact_file
+    from apps.core.resources.skill_loader import load_skill_manifest, read_artifact_file
 
     root = tmp_path / "skills"
     skill = root / "safe"

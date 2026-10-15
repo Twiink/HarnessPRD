@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     job_max_attempts: int = Field(default=3, ge=1)
     job_max_concurrency: int = Field(default=2, ge=1)
     job_shutdown_timeout: float = Field(default=5, gt=0)
+    job_run_timeout: float = Field(default=1200, gt=0)
+    llm_call_timeout: float = Field(default=180, gt=0)
+    llm_stream_idle_timeout: float = Field(default=120, gt=0)
+    job_max_queued: int = Field(default=100, ge=1)
+    job_health_failure_seconds: float = Field(default=30, gt=0)
+    job_progress_flush_interval: float = Field(default=0.25, gt=0)
+    job_progress_flush_bytes: int = Field(default=4096, ge=1)
     resources_dir: Path = BACKEND_DIR / "resources"
     skills_root: Path = REPO_ROOT / "skills"
     skills_config_path: Path = REPO_ROOT / "config" / "skills.yaml"

@@ -2,7 +2,9 @@
 
 from fastapi import APIRouter
 
-from apps.api import config, conversation, conversations, documents, jobs, session, sessions
+from apps.api import config, conversations, documents, jobs, sessions
+from apps.api.compat import conversation, session
+from apps.api.compat import documents as legacy_documents
 
 router = APIRouter()
 for resource in (
@@ -12,7 +14,7 @@ for resource in (
     config.router,
     jobs.router,
     session.router,
-    documents.legacy_router,
+    legacy_documents.router,
     conversation.router,
 ):
     router.include_router(resource)

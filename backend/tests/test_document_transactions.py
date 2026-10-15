@@ -5,9 +5,10 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from apps.db.connection import database_context, get_connection, transaction
-from apps.services import document_version_service as documents
-from apps.services import session_service as sessions
+from apps.services.documents import versions as documents
+from apps.services.sessions import state as sessions
 from apps.core.errors import DomainError
+from apps.domain.documents.content_identity import content_hash
 
 
 @pytest.fixture
@@ -21,7 +22,10 @@ def test_checkpoint_restore_preserve_history_and_mirror(session_id):
     saved = documents.checkpoint(session_id, "prd", "# Revised", "before review")
     current = documents.get_current_version(session_id, "prd")
     assert current["parent_version_id"] == original["id"]
-    assert current["metadata"] == {"change_note": "before review"}
+    assert current["metadata"] == {
+        "change_note": "before review",
+        "content_hash": content_hash("# Revised"),
+    }
     assert sessions.load_session_data_raw(session_id)["prdContent"] == "# Revised"
     restored = documents.restore_version(session_id, "prd", original["id"])
     assert restored["version_no"] == 3
@@ -37,9 +41,16 @@ def test_note_trim_clear_preserve_other_metadata_and_scope(session_id, isolated_
     current = documents.get_current_version(session_id, "prd")
     documents.patch_current_metadata(session_id, "prd", {"review": {"score": 80}})
     noted = documents.update_version_note(session_id, "prd", current["id"], "  checked  ")
-    assert noted["metadata"] == {"change_note": "checked", "review": {"score": 80}}
+    assert noted["metadata"] == {
+        "change_note": "checked",
+        "review": {"score": 80},
+        "content_hash": content_hash("# Original"),
+    }
     cleared = documents.update_version_note(session_id, "prd", current["id"], "   ")
-    assert cleared["metadata"] == {"review": {"score": 80}}
+    assert cleared["metadata"] == {
+        "review": {"score": 80},
+        "content_hash": content_hash("# Original"),
+    }
     other = sessions.save_session({"prdContent": "# Other"})["id"]
     with pytest.raises(documents.VersionNotFoundError):
         documents.update_version_note(other, "prd", current["id"], "unauthorized")

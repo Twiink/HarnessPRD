@@ -1,6 +1,7 @@
 """HTTP 边界统一错误协议，响应字段经过脱敏。"""
 
 import logging
+import sqlite3
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -104,8 +105,27 @@ async def unexpected_error_handler(request: Request, exc: Exception):
         "API request failed request_id=%s error_type=%s",
         getattr(request.state, "request_id", None),
         type(exc).__name__,
+        exc_info=(type(exc), exc, exc.__traceback__),
     )
     return error_response(request, status_code=500, code="INTERNAL_ERROR", message="服务内部错误")
+
+
+async def sqlite_error_handler(request: Request, exc: sqlite3.Error):
+    code = getattr(exc, "sqlite_errorcode", 0) or 0
+    # SQLite 的主结果码 BUSY=5、LOCKED=6；Python 3.10 尚未导出对应常量。
+    if code & 0xFF in (5, 6) or str(exc) in (
+        "database is locked",
+        "database table is locked",
+    ):
+        return error_response(
+            request,
+            status_code=503,
+            code="DB_BUSY",
+            message="数据库暂时繁忙，请稍后重试",
+            retryable=True,
+            headers={"Retry-After": "1"},
+        )
+    return await unexpected_error_handler(request, exc)
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -113,4 +133,5 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(HTTPException, http_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(KeyError, key_error_handler)
+    app.add_exception_handler(sqlite3.Error, sqlite_error_handler)
     app.add_exception_handler(Exception, unexpected_error_handler)

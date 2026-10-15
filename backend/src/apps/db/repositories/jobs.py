@@ -66,6 +66,8 @@ class JobRepository:
         key: str | None,
         digest: str,
         request_id: str | None,
+        *,
+        max_queued: int | None = None,
     ) -> str:
         with self.database.transaction() as conn:
             replay = self.replay(session_id, key, digest)
@@ -87,6 +89,17 @@ class JobRepository:
                     status_code=409,
                     details={"job_id": row["id"]},
                 )
+            if max_queued is not None:
+                queued = conn.execute(
+                    "SELECT COUNT(*) FROM generation_jobs WHERE status IN ('pending','queued','interrupted')"
+                ).fetchone()[0]
+                if queued >= max_queued:
+                    raise DomainError(
+                        "任务队列已满，请稍后重试",
+                        code="QUEUE_FULL",
+                        status_code=503,
+                        retryable=True,
+                    )
             job_id = str(uuid.uuid4())
             now = now_iso()
             conn.execute(
@@ -125,21 +138,29 @@ class JobRepository:
         max_attempts: int,
         exclude_job_ids: tuple[str, ...] = (),
     ) -> dict[str, Any] | None:
+        excluded = ""
+        parameters: tuple[Any, ...] = (max_attempts,)
+        if exclude_job_ids:
+            excluded = " AND id NOT IN (" + ",".join("?" for _ in exclude_job_ids) + ")"
+            parameters += exclude_job_ids
+        eligible = (
+            "status IN ('pending','queued','interrupted') AND cancel_requested=0 AND attempt_count<?"
+            + excluded
+        )
         with self.database.read() as conn:
             if not conn.execute(
-                "SELECT 1 FROM generation_jobs WHERE status IN ('pending','queued','interrupted') AND cancel_requested=0 AND attempt_count<? LIMIT 1",
-                (max_attempts,),
+                "SELECT 1 FROM generation_jobs WHERE " + eligible + " LIMIT 1", parameters
             ).fetchone():
                 return None
         with self.database.transaction() as conn:
-            rows = conn.execute(
-                "SELECT * FROM generation_jobs WHERE status IN ('pending','queued','interrupted') AND cancel_requested=0 AND attempt_count<? ORDER BY created_at,id",
-                (max_attempts,),
-            ).fetchall()
-            for row in rows:
+            row = conn.execute(
+                "SELECT id FROM generation_jobs WHERE "
+                + eligible
+                + " ORDER BY created_at,id LIMIT 1",
+                parameters,
+            ).fetchone()
+            if row:
                 job_id = row["id"]
-                if job_id in exclude_job_ids:
-                    continue
                 conn.execute(
                     "UPDATE generation_jobs SET status='running',phase='starting',worker_id=?,lease_until=?,attempt_count=attempt_count+1,started_at=COALESCE(started_at,?),finished_at=NULL,error=NULL,error_code=NULL,draft_content='',previous_draft='',review_json=NULL,result_json=NULL,updated_at=? WHERE id=?",
                     (worker_id, lease_deadline(lease_seconds), now_iso(), now_iso(), job_id),
@@ -152,6 +173,19 @@ class JobRepository:
                         "status": "running",
                         "attempt_count": claimed["attempt_count"],
                         "draft_content": "",
+                    },
+                )
+                # Existing browser streams reset accumulated text only on snapshot events.
+                self.events.append(
+                    job_id,
+                    {
+                        "type": "snapshot",
+                        "status": "running",
+                        "phase": "generating",
+                        "artifact": claimed["artifact"],
+                        "attempt_count": claimed["attempt_count"],
+                        "draft_content": "",
+                        "review": None,
                     },
                 )
                 return claimed
@@ -233,7 +267,15 @@ class JobRepository:
                 )
             return self.get(job_id)
 
-    def interrupt(self, job_id: str, worker_id: str, attempt: int) -> None:
+    def interrupt(
+        self,
+        job_id: str,
+        worker_id: str,
+        attempt: int,
+        *,
+        code: str | None = None,
+        message: str | None = None,
+    ) -> None:
         with self.database.transaction() as conn:
             job = self.get(job_id)
             if (
@@ -242,20 +284,41 @@ class JobRepository:
                 and job["attempt_count"] == attempt
             ):
                 conn.execute(
-                    "UPDATE generation_jobs SET status='interrupted',phase='interrupted',worker_id=NULL,lease_until=NULL,updated_at=? WHERE id=?",
-                    (now_iso(), job_id),
+                    "UPDATE generation_jobs SET status='interrupted',phase='interrupted',worker_id=NULL,lease_until=NULL,error_code=COALESCE(?,error_code),error=COALESCE(?,error),updated_at=? WHERE id=?",
+                    (code, message, now_iso(), job_id),
                 )
                 self.events.append(
                     job_id, {"type": "interrupted", "status": "interrupted", "retryable": True}
                 )
 
-    def expired(self) -> list[dict[str, Any]]:
+    def expired(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.database.read() as conn:
             rows = conn.execute(
-                "SELECT * FROM generation_jobs WHERE status='running' AND (lease_until IS NULL OR lease_until<=?)",
-                (now_iso(),),
+                "SELECT id,status,worker_id,lease_until,attempt_count,cancel_requested FROM generation_jobs WHERE status='running' AND (lease_until IS NULL OR lease_until<=?) ORDER BY lease_until,id LIMIT ?",
+                (now_iso(), limit),
             ).fetchall()
-        return [row_to_job(row) for row in rows]
+        return [dict(row) for row in rows]
+
+    def recoverable(self, max_attempts: int, limit: int = 100) -> list[dict[str, Any]]:
+        with self.database.read() as conn:
+            rows = conn.execute(
+                """SELECT id,status,attempt_count,cancel_requested FROM generation_jobs
+                WHERE (status IN ('pending','queued','interrupted','running') AND cancel_requested=1)
+                   OR (status IN ('pending','queued','interrupted') AND attempt_count>=?)
+                   OR status='interrupted' ORDER BY updated_at,id LIMIT ?""",
+                (max_attempts, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def owned_running(self, worker_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    "SELECT id,attempt_count FROM generation_jobs WHERE status='running' AND worker_id=?",
+                    (worker_id,),
+                )
+            ]
 
     def requeue(self, job_id: str) -> None:
         with self.database.transaction() as conn:

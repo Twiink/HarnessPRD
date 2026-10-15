@@ -20,6 +20,8 @@ def get_llm(temperature: float = 0.7) -> ChatAnthropic | ChatOpenAI:
             "model": model,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "timeout": settings.llm_call_timeout,
+            "max_retries": 0,
         }
         if settings.anthropic_base_url:
             kwargs["base_url"] = settings.anthropic_base_url
@@ -33,6 +35,8 @@ def get_llm(temperature: float = 0.7) -> ChatAnthropic | ChatOpenAI:
         "model": model,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "timeout": settings.llm_call_timeout,
+        "max_retries": 0,
     }
     if settings.openai_base_url:
         kwargs["base_url"] = settings.openai_base_url

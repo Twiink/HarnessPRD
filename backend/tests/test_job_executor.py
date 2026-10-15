@@ -5,8 +5,8 @@ import asyncio
 from apps.core.config import Settings, settings_context
 from apps.runtime.job_executor import JobExecutor
 from apps.runtime.job_manager import JobManager
-from apps.services.document_version_service import get_current_version, list_versions
-from apps.services.session_service import save_session
+from apps.services.documents.versions import get_current_version, list_versions
+from apps.services.sessions.state import save_session
 
 
 class Documents:

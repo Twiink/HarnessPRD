@@ -50,7 +50,7 @@ cd ..
 ```text
 HarnessPRD/
 ├── backend/
-│   ├── src/apps/        # API、业务、仓储、Agent/LLM 与任务运行时
+│   ├── src/apps/              # API、业务、仓储、Agent/LLM 与任务运行时
 │   ├── config/                # 模型能力注册表
 │   ├── resources/             # Prompt、问题与文档模板
 │   ├── tests/                 # 后端测试
@@ -77,6 +77,8 @@ npm --prefix frontend run build
 ```
 
 后端架构、任务恢复与 API 说明见 [backend/README.md](backend/README.md)。
+
+后端按资源 API、应用用例、领域规则和基础设施分层；模块边界由 AST 测试保护。故障诊断、SQLite 在线备份及恢复步骤见 [后端运行手册](docs/backend-operations.md)。GitHub Actions 自动执行锁文件、格式、静态规则、全量测试与依赖边界检查。
 
 后端依赖由 `backend/pyproject.toml` 和 `backend/uv.lock` 管理。`backend/requirements.txt` 是供 pip 和 Docker 环境使用的锁定导出；修改依赖后运行：
 

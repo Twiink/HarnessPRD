@@ -7,9 +7,9 @@ import zipfile
 import pytest
 
 from apps.db import connection as database
-from apps.services.delivery_export_service import build_delivery_zip
-from apps.services.document_service import _build_prd_from_summary_prompt
-from apps.services.document_version_service import (
+from apps.services.documents.export import build_delivery_zip
+from apps.services.generation.documents import _build_prd_from_summary_prompt
+from apps.services.documents.versions import (
     checkpoint,
     get_current_version,
     get_version,
@@ -17,8 +17,8 @@ from apps.services.document_version_service import (
     restore_version,
     update_version_note,
 )
-from apps.services.requirements_normalization import normalize_feature_fields
-from apps.services.session_service import get_session, save_session
+from apps.domain.requirements.normalization import normalize_feature_fields
+from apps.services.sessions.state import get_session, save_session
 
 
 def test_merge_feature_sources_preserves_details_and_is_idempotent():

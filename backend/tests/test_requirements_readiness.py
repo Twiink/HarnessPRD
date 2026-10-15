@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from apps.services.requirements_readiness import (  # noqa: E402
+from apps.domain.requirements.readiness import (  # noqa: E402
     assess_requirements_readiness,
     readiness_has_blockers,
 )

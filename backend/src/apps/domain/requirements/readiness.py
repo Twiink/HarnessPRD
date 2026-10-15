@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from apps.services.requirements_normalization import normalize_feature_fields
+from apps.domain.requirements.normalization import normalize_feature_fields
 
 
 def _non_empty_lines(value: Any) -> List[str]:

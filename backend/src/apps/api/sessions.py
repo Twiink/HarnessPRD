@@ -8,9 +8,11 @@ from pydantic import BaseModel, ConfigDict
 
 from apps.api.deps import get_resources
 from apps.core.errors import DomainError
-from apps.services.delivery_export_service import build_delivery_zip
-from apps.services.http_headers import build_attachment_content_disposition
-from apps.services.session_service import (
+from apps.domain.inputs import SessionInput, input_dict
+from apps.services.sessions.commands import create_session, patch_session
+from apps.services.documents.export import build_delivery_zip
+from apps.api.http_headers import build_attachment_content_disposition
+from apps.services.sessions.state import (
     delete_session,
     get_session,
     list_sessions,
@@ -22,7 +24,7 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 class SessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    session_data: dict[str, Any]
+    session_data: SessionInput
 
 
 class SaveSessionRequest(SessionRequest):
@@ -57,14 +59,12 @@ class OkResponse(BaseModel):
 
 
 def api_save_session(body: SaveSessionRequest, resources=Depends(get_resources)):
-    return save_session(body.session_data, body.id)
+    return save_session(input_dict(body.session_data), body.id)
 
 
 @router.post("", response_model=SessionDetailResponse, status_code=201)
 def api_create_session(body: SessionRequest, resources=Depends(get_resources)):
-    with resources.database.transaction():
-        saved = save_session(body.session_data)
-        return get_session(saved["id"])
+    return create_session(resources.database, input_dict(body.session_data))
 
 
 @router.get("", response_model=SessionListResponse)
@@ -92,10 +92,7 @@ def api_get_session(session_id: str, resources=Depends(get_resources)):
 
 @router.patch("/{session_id}", response_model=SessionDetailResponse)
 def api_patch_session(session_id: str, body: SessionRequest, resources=Depends(get_resources)):
-    with resources.database.transaction():
-        current = get_session(session_id)
-        save_session({**current["session_data"], **body.session_data}, session_id)
-        return get_session(session_id)
+    return patch_session(resources.database, session_id, input_dict(body.session_data))
 
 
 @router.delete("/{session_id}", response_model=OkResponse)

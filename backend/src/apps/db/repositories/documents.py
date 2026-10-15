@@ -1,10 +1,10 @@
 """Document/version persistence. Version policies and metadata stay in the service."""
 
-from apps.db.connection import get_connection
+from apps.db.connection import get_connection, read_connection
 
 
 def get_document(session_id: str, doc_type: str) -> dict | None:
-    with get_connection() as conn:
+    with read_connection() as conn:
         row = conn.execute(
             "SELECT * FROM documents WHERE session_id=? AND doc_type=?",
             (session_id, doc_type),
@@ -23,7 +23,7 @@ def insert_document(row: dict) -> None:
 
 
 def get_version(document_id: str, version_id: str) -> dict | None:
-    with get_connection() as conn:
+    with read_connection() as conn:
         row = conn.execute(
             "SELECT * FROM document_versions WHERE document_id=? AND id=?",
             (document_id, version_id),
@@ -32,7 +32,7 @@ def get_version(document_id: str, version_id: str) -> dict | None:
 
 
 def list_versions(document_id: str) -> list[dict]:
-    with get_connection() as conn:
+    with read_connection() as conn:
         return [
             dict(row)
             for row in conn.execute(
@@ -43,7 +43,7 @@ def list_versions(document_id: str) -> list[dict]:
 
 
 def version_by_number(document_id: str, number: int) -> dict | None:
-    with get_connection() as conn:
+    with read_connection() as conn:
         row = conn.execute(
             "SELECT * FROM document_versions WHERE document_id=? AND version_no=?",
             (document_id, number),
@@ -52,7 +52,7 @@ def version_by_number(document_id: str, number: int) -> dict | None:
 
 
 def version_by_job(document_id: str, job_id: str) -> dict | None:
-    with get_connection() as conn:
+    with read_connection() as conn:
         row = conn.execute(
             "SELECT * FROM document_versions WHERE document_id=? AND source_job_id=?",
             (document_id, job_id),
@@ -61,7 +61,7 @@ def version_by_job(document_id: str, job_id: str) -> dict | None:
 
 
 def has_generated_version(document_id: str) -> bool:
-    with get_connection() as conn:
+    with read_connection() as conn:
         return (
             conn.execute(
                 "SELECT 1 FROM document_versions WHERE document_id=? AND source_kind='generate' LIMIT 1",
@@ -72,7 +72,7 @@ def has_generated_version(document_id: str) -> bool:
 
 
 def next_version_number(document_id: str) -> int:
-    with get_connection() as conn:
+    with read_connection() as conn:
         row = conn.execute(
             "SELECT MAX(version_no) FROM document_versions WHERE document_id=?",
             (document_id,),
