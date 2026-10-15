@@ -9,8 +9,8 @@ from apps.db.repositories.jobs import JobRepository, submission_hash
 from apps.db.repositories.events import EventRepository
 from apps.domain.jobs import JobOutcome
 from apps.runtime.job_manager import JobManager
-from apps.services.session_service import save_session, load_session_data_raw
-from apps.services.document_version_service import (
+from apps.services.sessions.state import save_session, load_session_data_raw
+from apps.services.documents.versions import (
     get_current_version,
     list_versions,
     sync_from_job,
@@ -374,7 +374,7 @@ def test_executor_ignoring_cancel_cannot_finalize(isolated_database):
 
 
 def test_loading_active_session_does_not_materialize_cancelled_draft(isolated_database):
-    from apps.services.session_service import get_session
+    from apps.services.sessions.state import get_session
 
     async def run():
         settings = config(isolated_database)
@@ -419,9 +419,17 @@ def test_parallel_artifacts_preserve_other_active_job(isolated_database):
             manager = JobManager(isolated_database, settings, executor)
             await manager.start()
             try:
-                session_id = save_session(
-                    {"prdContent": "# baseline", "prdBaselineConfirmed": True}
-                )["id"]
+                session_id = save_session({"prdContent": "# baseline"})["id"]
+                baseline = get_current_version(session_id, "prd")
+                save_session(
+                    {
+                        "prdBaselineConfirmed": True,
+                        "prdBaselineVersionId": baseline["id"],
+                        "prdBaselineVersionNo": baseline["version_no"],
+                        "prdBaselineContentHash": baseline["metadata"]["content_hash"][:16],
+                    },
+                    session_id,
+                )
                 api_job = await manager.submit(session_id, "api-docs", {})
                 await asyncio.wait_for(executor.api_started.wait(), 1)
                 prompts_job = await manager.submit(session_id, "prompts", {})

@@ -1,15 +1,15 @@
 """对话服务 — 负责需求收集对话的启动与延续"""
 
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncGenerator, Callable
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
 
-from apps.llm.messages import build_lc_messages
+from apps.llm.messages import build_lc_messages, message_text
 from apps.llm.factory import get_tracked_llm
 from apps.llm.metrics import LlmStep
 from apps.llm.token_budget import get_last_budget_check
-from apps.services.prompts import get_prompt
-from apps.services.clarification_response import parse_clarification_response
+from apps.core.resources.prompts import get_prompt
+from apps.services.conversations.clarification import parse_clarification_response
 
 
 def format_form_data(form_data: Dict[str, Any]) -> str:
@@ -48,7 +48,7 @@ def _serialize_messages(
             role = "human"
         elif role == "ai":
             role = "ai"
-        serialized.append({"role": role, "content": msg.content})
+        serialized.append({"role": role, "content": message_text(msg.content)})
 
     if last_clarification_meta and serialized:
         last = serialized[-1]
@@ -63,6 +63,9 @@ def _finalize_ai_response(full_content: str) -> tuple[str, Optional[Dict[str, An
 
 
 class ConversationService:
+    def __init__(self, llm_factory: Callable[..., Any] | None = None):
+        self._llm_factory = llm_factory
+
     def _build_initial_messages(
         self,
         user_initial_input: str,
@@ -93,7 +96,7 @@ class ConversationService:
         form_data: Optional[Dict[str, Any]] = None,
         system_prompt_override: Optional[str] = None,
     ) -> AsyncGenerator[Dict, None]:
-        llm = get_tracked_llm(LlmStep.CHAT_START.value)
+        llm = (self._llm_factory or get_tracked_llm)(LlmStep.CHAT_START.value)
         lc_messages = self._build_initial_messages(
             user_initial_input,
             form_data,
@@ -102,9 +105,10 @@ class ConversationService:
 
         full_content = ""
         async for chunk in llm.astream(lc_messages):
-            if chunk.content:
-                full_content += chunk.content
-                yield {"type": "chunk", "content": chunk.content}
+            text = message_text(chunk.content)
+            if text:
+                full_content += text
+                yield {"type": "chunk", "content": text}
 
         display_content, clarification_meta = _finalize_ai_response(full_content)
         lc_messages.append(AIMessage(content=display_content))
@@ -125,7 +129,7 @@ class ConversationService:
         messages: List[Dict[str, Any]],
         user_input: str,
     ) -> AsyncGenerator[Dict, Any]:
-        llm = get_tracked_llm(LlmStep.CHAT_CONTINUE.value)
+        llm = (self._llm_factory or get_tracked_llm)(LlmStep.CHAT_CONTINUE.value)
         lc_messages = build_lc_messages(messages)
         last_message = lc_messages[-1] if lc_messages else None
         if not (isinstance(last_message, HumanMessage) and last_message.content == user_input):
@@ -133,9 +137,10 @@ class ConversationService:
 
         full_content = ""
         async for chunk in llm.astream(lc_messages):
-            if chunk.content:
-                full_content += chunk.content
-                yield {"type": "chunk", "content": chunk.content}
+            text = message_text(chunk.content)
+            if text:
+                full_content += text
+                yield {"type": "chunk", "content": text}
 
         display_content, clarification_meta = _finalize_ai_response(full_content)
         lc_messages.append(AIMessage(content=display_content))

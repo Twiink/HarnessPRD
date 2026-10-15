@@ -7,7 +7,10 @@ import sqlite3
 
 import httpx
 import uuid
+import time
 from typing import Any
+
+from pydantic import ValidationError
 
 from apps.core.config import Settings
 from apps.core.errors import DomainError
@@ -16,17 +19,20 @@ from apps.db.connection import Database, database_context
 from apps.db.repositories.events import EventRepository
 from apps.db.repositories.jobs import JobRepository, submission_hash
 from apps.domain.jobs import Artifact, JobOutcome, LeaseLostError, TERMINAL_STATUSES
+from apps.domain.inputs import RequirementsInput, input_dict
 from apps.runtime.events import EventBroker
 from apps.runtime.job_executor import Executor
 from apps.runtime.recovery import recover_expired
-from apps.services.delivery_guards import assert_can_create_job
-from apps.services.document_version_service import (
+from apps.runtime.progress import JobProgress
+from apps.services.generation.guards import assert_can_create_job
+from apps.services.documents.versions import (
     ARTIFACT_TO_DOC_TYPE,
     DOC_TYPE_TO_SESSION_FIELD,
+    build_source_snapshot,
     sync_from_job,
 )
-from apps.services.quality_gate import build_gate_context_from_job, run_quality_gate
-from apps.services.session_service import (
+from apps.domain.documents.quality import build_gate_context_from_job, run_quality_gate
+from apps.services.sessions.state import (
     load_session_data_raw,
     sync_session_active_job,
     sync_session_active_optimize_job,
@@ -48,7 +54,9 @@ PAYLOAD_FIELDS = {
 }
 
 
-def prepare_payload(session: dict, artifact: str, payload: dict) -> dict:
+def prepare_payload(
+    session: dict, artifact: str, payload: dict, session_id: str | None = None
+) -> dict:
     if set(payload) - PAYLOAD_FIELDS[artifact]:
         raise DomainError("任务包含未知输入字段", code="INVALID_JOB_PAYLOAD", status_code=422)
     prepared = dict(payload)
@@ -59,6 +67,14 @@ def prepare_payload(session: dict, artifact: str, payload: dict) -> dict:
             or not prepared["requirements_summary"]
         ):
             raise DomainError("缺少结构化需求摘要", code="INVALID_JOB_PAYLOAD")
+        try:
+            prepared["requirements_summary"] = input_dict(
+                RequirementsInput.model_validate(prepared["requirements_summary"])
+            )
+        except ValidationError as exc:
+            raise DomainError(
+                "无效的结构化需求摘要", code="INVALID_JOB_PAYLOAD", status_code=422
+            ) from exc
     elif artifact in ("api-docs", "prompts"):
         prepared.setdefault("prd_content", session.get("prdContent") or "")
         if not isinstance(prepared["prd_content"], str) or not prepared["prd_content"].strip():
@@ -89,7 +105,10 @@ def prepare_payload(session: dict, artifact: str, payload: dict) -> dict:
             for m in messages
         ):
             raise DomainError("无效的对话消息", code="INVALID_JOB_PAYLOAD")
-    assert_can_create_job(session, artifact, prepared)
+    if session_id is None:
+        assert_can_create_job(session, artifact, prepared)
+    else:
+        assert_can_create_job(session, artifact, prepared, session_id=session_id)
     return prepared
 
 
@@ -113,6 +132,39 @@ class JobManager:
         self._poller: asyncio.Task | None = None
         self._closing = False
         self._wakeup = asyncio.Event()
+        self._last_success: float | None = None
+        self._failure_since: float | None = None
+        self._consecutive_failures = 0
+        self._last_error_type: str | None = None
+        self._timed_out_tasks: set[str] = set()
+        self._cancellation_requested: set[str] = set()
+        self._progress: dict[str, JobProgress] = {}
+
+    @property
+    def healthy(self) -> bool:
+        now = time.monotonic()
+        return (
+            self.running
+            and self._last_success is not None
+            and now - self._last_success < self.settings.job_health_failure_seconds
+            and (
+                self._failure_since is None
+                or now - self._failure_since < self.settings.job_health_failure_seconds
+            )
+        )
+
+    @property
+    def health(self) -> dict[str, Any]:
+        now = time.monotonic()
+        return {
+            "last_success_age_seconds": now - self._last_success
+            if self._last_success is not None
+            else None,
+            "failure_seconds": now - self._failure_since if self._failure_since is not None else 0,
+            "consecutive_failures": self._consecutive_failures,
+            "last_error_type": self._last_error_type,
+            "timed_out_tasks": sorted(self._timed_out_tasks),
+        }
 
     @property
     def running(self) -> bool:
@@ -128,6 +180,10 @@ class JobManager:
         self._closing = False
         with database_context(self.database):
             await asyncio.to_thread(self._recover)
+        self._last_success = time.monotonic()
+        self._failure_since = None
+        self._consecutive_failures = 0
+        self._last_error_type = None
         self._poller = asyncio.create_task(self._serve(), name="harnessprd-job-manager")
 
     async def _drain(self, tasks: list[asyncio.Task], *, cancel: bool = True) -> None:
@@ -152,9 +208,8 @@ class JobManager:
 
     def _fence_shutdown(self) -> None:
         with database_context(self.database), self.database.transaction():
-            for job in self.jobs.unfinished():
-                if job["status"] == "running" and job["worker_id"] == self.worker_id:
-                    self.jobs.interrupt(job["id"], self.worker_id, job["attempt_count"])
+            for job in self.jobs.owned_running(self.worker_id):
+                self.jobs.interrupt(job["id"], self.worker_id, job["attempt_count"])
 
     async def close(self) -> None:
         self._closing = True
@@ -166,17 +221,19 @@ class JobManager:
             try:
                 await asyncio.to_thread(self._fence_shutdown)
             except sqlite3.Error:
-                logger.error("关闭时无法写入中断状态，任务将在租约到期后恢复")
+                logger.exception("关闭时无法写入中断状态，任务将在租约到期后恢复")
             await self._drain(list(self._tasks.values()))
             self._tasks.clear()
             self._attempts.clear()
+            self._timed_out_tasks.clear()
+            self._cancellation_requested.clear()
         finally:
             self.events.close()
 
     async def submit(
         self, session_id: str, artifact: str, payload: dict, idempotency_key: str | None = None
     ) -> str:
-        if self._closing or not self.running:
+        if self._closing or not self.healthy:
             raise DomainError("任务服务未就绪", code="NOT_READY", status_code=503, retryable=True)
         if artifact not in {entry.value for entry in Artifact}:
             raise DomainError("无效的任务类型", code="INVALID_ARTIFACT", status_code=422)
@@ -207,9 +264,16 @@ class JobManager:
             if replay:
                 return replay
             session = load_session_data_raw(session_id)
-            prepared = prepare_payload(session, artifact, payload)
+            prepared = prepare_payload(session, artifact, payload, session_id)
+            prepared["_source_snapshot"] = build_source_snapshot(session_id, artifact, prepared)
             job_id = self.jobs.create(
-                session_id, artifact, prepared, idempotency_key, digest, get_request_id()
+                session_id,
+                artifact,
+                prepared,
+                idempotency_key,
+                digest,
+                get_request_id(),
+                max_queued=self.settings.job_max_queued,
             )
             if artifact.startswith("optimize-"):
                 sync_session_active_optimize_job(session_id, job_id)
@@ -224,7 +288,18 @@ class JobManager:
                 self._cancel_finalize(job_id)
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
-        await asyncio.to_thread(self._persist_cancel, job_id)
+        progress = self._progress.get(job_id)
+
+        async def persist_cancel() -> None:
+            await asyncio.to_thread(self._persist_cancel, job_id)
+
+        if progress:
+            try:
+                await progress.flush_and_fence(persist_cancel)
+            except LeaseLostError:
+                await persist_cancel()
+        else:
+            await persist_cancel()
         self.events.notify(job_id)
         task = self._tasks.get(job_id)
         if task:
@@ -233,7 +308,7 @@ class JobManager:
 
     def _recover(self) -> None:
         with self.database.transaction():
-            for job in self.jobs.unfinished():
+            for job in self.jobs.recoverable(self.settings.job_max_attempts):
                 if job["cancel_requested"]:
                     self._cancel_finalize(job["id"])
                 elif (
@@ -262,6 +337,8 @@ class JobManager:
                         if task.done():
                             self._tasks.pop(job_id, None)
                             self._attempts.pop(job_id, None)
+                            self._timed_out_tasks.discard(job_id)
+                            self._cancellation_requested.discard(job_id)
                             if not task.cancelled():
                                 task.exception()
                         else:
@@ -277,7 +354,8 @@ class JobManager:
                                 if exc.status_code != 404:
                                     raise
                                 still_owned = False
-                            if not still_owned:
+                            if not still_owned and job_id not in self._cancellation_requested:
+                                self._cancellation_requested.add(job_id)
                                 task.cancel()
                     await asyncio.to_thread(self._recover)
                     while len(self._tasks) < self.settings.job_max_concurrency:
@@ -300,10 +378,18 @@ class JobManager:
                         self._tasks[job["id"]] = task
                         self._attempts[job["id"]] = job["attempt_count"]
                         task.add_done_callback(lambda _: self._wakeup.set())
+                    self._last_success = time.monotonic()
+                    self._failure_since = None
+                    self._consecutive_failures = 0
+                    self._last_error_type = None
                 except asyncio.CancelledError:
                     raise
-                except Exception:
-                    logger.error("任务队列轮询失败")
+                except Exception as exc:
+                    if self._failure_since is None:
+                        self._failure_since = time.monotonic()
+                    self._consecutive_failures += 1
+                    self._last_error_type = type(exc).__name__
+                    logger.exception("任务队列轮询失败 worker_id=%s", self.worker_id)
                 try:
                     await asyncio.wait_for(
                         self._wakeup.wait(), timeout=self.settings.job_poll_interval
@@ -325,9 +411,10 @@ class JobManager:
                     self.settings.job_lease_seconds,
                 )
             except Exception:
-                logger.error("任务续租失败 job_id=%s", job["id"])
+                logger.exception("任务续租失败 job_id=%s", job["id"])
                 renewed = False
             if not renewed:
+                self._cancellation_requested.add(job["id"])
                 execution.cancel()
                 return
 
@@ -339,43 +426,41 @@ class JobManager:
         execution = asyncio.current_task()
         assert execution is not None
         heartbeat = asyncio.create_task(self._heartbeat(job, execution), name=f"lease:{job_id}")
-        draft = ""
 
-        async def emit(event: dict) -> None:
-            nonlocal draft
-            fields = {}
-            event_type = event["type"]
-            if event_type in ("chunk", "text_delta"):
-                draft += event.get("content") or ""
-                fields["draft_content"] = draft
-            elif event_type == "phase":
-                phase = str(event.get("phase") or "")
-                fields["phase"] = {
-                    "writer_started": "writing",
-                    "review_started": "reviewing",
-                    "rewrite_started": "rewriting",
-                }.get(phase, phase or "generating")
-                if phase == "rewrite_started":
-                    fields.update(previous_draft=draft, draft_content="")
-                    draft = ""
-            elif event_type == "review":
-                fields["review_json"] = json.dumps(event.get("content"), ensure_ascii=False)
-            if event_type in ("done", "run_summary"):
-                return
-
-            def persist_event():
+        async def persist(fields: dict, batch: list[dict]) -> None:
+            def persist_batch():
                 with self.database.transaction():
                     if self._closing or not self.jobs.progress(
                         job_id, self.worker_id, attempt, **fields
                     ):
                         raise LeaseLostError()
-                    self.event_repository.append(job_id, event)
+                    for event in batch:
+                        self.event_repository.append(job_id, event)
 
-            await asyncio.to_thread(persist_event)
+            await asyncio.to_thread(persist_batch)
             self.events.notify(job_id)
 
+        progress = JobProgress(persist, flush_bytes=self.settings.job_progress_flush_bytes)
+        self._progress[job_id] = progress
+
+        async def flush_periodically() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(self.settings.job_progress_flush_interval)
+                    await progress.flush()
+            except LeaseLostError:
+                execution.cancel()
+            except Exception:
+                logger.exception("任务进度刷新失败 job_id=%s", job_id)
+                execution.cancel()
+
+        flusher = asyncio.create_task(flush_periodically(), name=f"progress:{job_id}")
+        watchdog = asyncio.create_task(
+            self._watch_timeout(job, execution, progress), name=f"timeout:{job_id}"
+        )
         try:
-            outcome = await self.executor.execute(job, emit)
+            outcome = await self.executor.execute(job, progress.emit)
+            await progress.flush()
             await asyncio.to_thread(self._complete, job, outcome)
         except asyncio.CancelledError:
             try:
@@ -387,16 +472,85 @@ class JobManager:
             pass
         except Exception as exc:
             try:
+                await progress.flush()
+            except LeaseLostError:
+                pass
+            except sqlite3.Error:
+                logger.exception("任务失败前无法刷新草稿 job_id=%s", job_id)
+            try:
                 await asyncio.to_thread(self._execution_failed, job_id, attempt, exc)
             except (sqlite3.Error, DomainError):
                 logger.error("任务失败状态未写入，等待租约恢复 job_id=%s", job_id)
             logger.error("任务失败 job_id=%s error_type=%s", job_id, type(exc).__name__)
         finally:
-            heartbeat.cancel()
-            await asyncio.gather(heartbeat, return_exceptions=True)
+            progress.revoked = True
+            for child in (heartbeat, flusher, watchdog):
+                child.cancel()
+            await asyncio.gather(heartbeat, flusher, watchdog, return_exceptions=True)
+            self._progress.pop(job_id, None)
             request_id_var.reset(request_token)
             session_id_var.reset(session_token)
             self.events.notify(job_id)
+
+    async def _watch_timeout(
+        self, job: dict, execution: asyncio.Task, progress: JobProgress
+    ) -> None:
+        await asyncio.sleep(self.settings.job_run_timeout)
+        # Fence durably before cancellation. A stubborn executor stays in _tasks and retains its slot.
+        while not self._closing:
+            try:
+                fenced = False
+
+                async def revoke() -> None:
+                    nonlocal fenced
+                    fenced = await asyncio.to_thread(self._timeout_execution, job)
+
+                await progress.flush_and_fence(revoke)
+                if fenced:
+                    self._timed_out_tasks.add(job["id"])
+                    self._cancellation_requested.add(job["id"])
+                    self.events.notify(job["id"])
+                    execution.cancel()
+                return
+            except LeaseLostError:
+                return
+            except sqlite3.Error:
+                logger.exception("任务超时撤销所有权失败 job_id=%s", job["id"])
+                await asyncio.sleep(self.settings.job_poll_interval)
+
+    def _timeout_execution(self, job: dict) -> bool:
+        with self.database.transaction():
+            current = self.jobs.get(job["id"])
+            if not (
+                current["status"] == "running"
+                and current["worker_id"] == self.worker_id
+                and current["attempt_count"] == job["attempt_count"]
+            ):
+                return False
+            message = "任务超过执行时限"
+            if current["cancel_requested"]:
+                self._cancel_finalize(job["id"])
+            elif current["attempt_count"] >= self.settings.job_max_attempts:
+                self._fail_finalize(job["id"], "JOB_RUN_TIMEOUT", message)
+            else:
+                self.jobs.interrupt(
+                    job["id"],
+                    self.worker_id,
+                    job["attempt_count"],
+                    code="JOB_RUN_TIMEOUT",
+                    message=message,
+                )
+                self.event_repository.append(
+                    job["id"],
+                    {
+                        "type": "retrying",
+                        "code": "JOB_RUN_TIMEOUT",
+                        "retryable": True,
+                        "attempt_count": job["attempt_count"],
+                    },
+                )
+                self.jobs.requeue(job["id"])
+            return True
 
     def _interrupt_execution(self, job_id: str, attempt: int) -> None:
         with self.database.transaction():

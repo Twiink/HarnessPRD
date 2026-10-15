@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from apps.services.clarification_response import (  # noqa: E402
+from apps.services.conversations.clarification import (  # noqa: E402
     normalize_clarification_meta,
     parse_clarification_response,
     strip_clarification_state_block,

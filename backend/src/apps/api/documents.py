@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.deps import get_resources
 from apps.domain.documents import VersionSourceKind
-from apps.services.document_version_service import (
+from apps.services.documents.versions import (
     checkpoint,
     get_documents_by_session,
     get_version,
@@ -18,7 +18,6 @@ from apps.services.document_version_service import (
 
 DocumentType = Literal["prd", "api-docs", "prompts"]
 router = APIRouter(prefix="/api/sessions", tags=["documents"])
-legacy_router = APIRouter(prefix="/api/session", tags=["documents"], include_in_schema=False)
 
 
 class DocumentSlotItem(BaseModel):
@@ -131,14 +130,6 @@ def api_restore_version(
     return restore_version(session_id, doc_type, body.version_id)
 
 
-def legacy_restore_version(
-    session_id: str, doc_type: DocumentType, version_id: str, resources=Depends(get_resources)
-):
-    return api_restore_version(
-        session_id, doc_type, RestoreRequest(version_id=version_id), resources
-    )
-
-
 @router.patch(
     "/{session_id}/documents/{doc_type}/versions/{version_id}/note",
     response_model=UpdateVersionNoteResponse,
@@ -156,41 +147,3 @@ def api_update_version_note(
         "version_no": data["version_no"],
         "change_note": (data.get("metadata") or {}).get("change_note"),
     }
-
-
-legacy_router.add_api_route(
-    "/{session_id}/documents",
-    api_list_documents,
-    methods=["GET"],
-    response_model=DocumentListResponse,
-)
-legacy_router.add_api_route(
-    "/{session_id}/documents/{doc_type}/versions",
-    api_list_versions,
-    methods=["GET"],
-    response_model=VersionListResponse,
-)
-legacy_router.add_api_route(
-    "/{session_id}/documents/{doc_type}/versions/{version_id}",
-    api_get_version,
-    methods=["GET"],
-    response_model=VersionDetailResponse,
-)
-legacy_router.add_api_route(
-    "/{session_id}/documents/{doc_type}/versions/checkpoint",
-    api_checkpoint,
-    methods=["POST"],
-    response_model=CheckpointResponse,
-)
-legacy_router.add_api_route(
-    "/{session_id}/documents/{doc_type}/versions/{version_id}/restore",
-    legacy_restore_version,
-    methods=["POST"],
-    response_model=RestoreResponse,
-)
-legacy_router.add_api_route(
-    "/{session_id}/documents/{doc_type}/versions/{version_id}/note",
-    api_update_version_note,
-    methods=["PATCH"],
-    response_model=UpdateVersionNoteResponse,
-)

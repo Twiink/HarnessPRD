@@ -5,7 +5,8 @@ import pytest
 from apps.core.config import Settings, settings_context
 from apps.domain.jobs import JobOutcome
 from apps.runtime.job_manager import JobManager
-from apps.services.session_service import load_session_data_raw, save_session
+from apps.services.documents.versions import get_current_version
+from apps.services.sessions.state import load_session_data_raw, save_session
 from tests.test_job_runtime import wait_terminal
 
 
@@ -48,9 +49,18 @@ def test_terminal_job_selects_remaining_active_job(
                     {
                         "requirementsSummary": {"product_name": "parallel terminal test"},
                         "prdContent": "# baseline",
-                        "prdBaselineConfirmed": True,
                     }
                 )["id"]
+                baseline = get_current_version(session_id, "prd")
+                save_session(
+                    {
+                        "prdBaselineConfirmed": True,
+                        "prdBaselineVersionId": baseline["id"],
+                        "prdBaselineVersionNo": baseline["version_no"],
+                        "prdBaselineContentHash": baseline["metadata"]["content_hash"][:16],
+                    },
+                    session_id,
+                )
                 api_job = None
                 if with_api:
                     api_job = await manager.submit(session_id, "api-docs", {})

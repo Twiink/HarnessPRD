@@ -8,6 +8,7 @@ from starlette.middleware.cors import CORSMiddleware
 from apps.core.config import settings_context
 from apps.core.request_context import request_id_var, session_id_var
 from apps.db.connection import database_context
+from apps.llm.runtime import llm_runtime_context
 
 
 class RequestIdMiddleware:
@@ -68,7 +69,11 @@ class RequestIdMiddleware:
                         ],
                         expose_headers=["X-Request-ID"],
                     )
-                with settings_context(resources.settings), database_context(resources.database):
+                with (
+                    settings_context(resources.settings),
+                    database_context(resources.database),
+                    llm_runtime_context(resources.llm_runtime),
+                ):
                     await self._cors(scope, receive, send_with_id)
         finally:
             request_id_var.reset(request_token)

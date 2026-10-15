@@ -1,17 +1,17 @@
 """Session row access and deletion of session-owned records."""
 
-from apps.db.connection import get_connection
+from apps.db.connection import get_connection, read_connection
 from apps.domain.jobs import ACTIVE_STATUSES
 
 
 def get(session_id: str) -> dict | None:
-    with get_connection() as conn:
+    with read_connection() as conn:
         row = conn.execute("SELECT * FROM project_sessions WHERE id = ?", (session_id,)).fetchone()
         return dict(row) if row else None
 
 
 def list_all() -> list[dict]:
-    with get_connection() as conn:
+    with read_connection() as conn:
         rows = conn.execute(
             """SELECT id, title, entry_mode, current_stage, status, created_at, updated_at
             FROM project_sessions ORDER BY updated_at DESC"""
@@ -49,7 +49,7 @@ def update_data(session_id: str, data: str, now: str) -> None:
 
 def active_job_id(session_id: str, exclude_job_id: str | None = None) -> str | None:
     placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
-    with get_connection() as conn:
+    with read_connection() as conn:
         row = conn.execute(
             f"SELECT id FROM generation_jobs WHERE session_id=? AND status IN ({placeholders}) AND id!=? ORDER BY created_at,id LIMIT 1",
             (session_id, *ACTIVE_STATUSES, exclude_job_id or ""),

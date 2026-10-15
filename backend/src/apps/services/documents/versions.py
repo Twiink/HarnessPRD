@@ -1,12 +1,12 @@
 """Document version use cases; SQL is owned by document/session repositories."""
 
 import json
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from apps.db.connection import transaction
+from apps.domain.documents.content_identity import bind_metadata, content_hash
 from apps.db.repositories import documents as repository
 from apps.db.repositories import sessions as session_repository
 from apps.domain.documents import (
@@ -20,7 +20,22 @@ from apps.domain.documents import (
     RestoreError,
 )
 
-CONTENT_PREVIEW_LEN = 200
+from apps.services.documents.queries import (
+    _validate_doc_type,
+    _require_session,
+    _build_preview,
+    _version_list_metadata,
+    _parse_metadata,
+    _row_to_version,
+    get_document,
+    get_current_version,
+    get_documents_by_session,
+    list_versions,
+    get_version,
+    get_current_content_for_doc_type,
+    build_source_snapshot,
+)
+
 ARTIFACT_TO_DOC_TYPE = {
     "prd": "prd",
     "optimize-prd": "prd",
@@ -40,64 +55,10 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _validate_doc_type(doc_type: str) -> str:
-    if doc_type not in VALID_DOC_TYPES:
-        raise InvalidDocTypeError(doc_type)
-    return doc_type
-
-
-def _require_session(session_id: str) -> dict:
-    session = session_repository.get(session_id)
-    if session is None:
-        raise SessionNotFoundError(session_id)
-    return session
-
-
-def _build_preview(content: str) -> str:
-    text = re.sub(r"\s+", " ", content or "").strip()
-    return text if len(text) <= CONTENT_PREVIEW_LEN else text[:CONTENT_PREVIEW_LEN] + "..."
-
-
-def _version_list_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
-    out = {}
-    note = (meta.get("change_note") or "").strip()
-    if note:
-        out["change_note"] = note
-    if meta.get("restored_from_version_no") is not None:
-        out["restored_from_version_no"] = int(meta["restored_from_version_no"])
-    return out
-
-
-def _parse_metadata(raw: Optional[str]) -> Dict[str, Any]:
-    if not raw:
-        return {}
-    try:
-        value = json.loads(raw)
-        return value if isinstance(value, dict) else {}
-    except (json.JSONDecodeError, TypeError):
-        return {}
-
-
 def merge_metadata(old: Optional[Dict[str, Any]], new: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     merged = dict(old or {})
     merged.update({key: value for key, value in (new or {}).items() if value is not None})
     return merged
-
-
-def _row_to_version(row: dict, current_version_id: Optional[str]) -> Dict[str, Any]:
-    return {
-        "id": row["id"],
-        "document_id": row["document_id"],
-        "version_no": row["version_no"],
-        "content": row["content"] or "",
-        "source_kind": row["source_kind"],
-        "source_job_id": row["source_job_id"],
-        "parent_version_id": row["parent_version_id"],
-        "metadata": _parse_metadata(row["metadata_json"]),
-        "created_at": row["created_at"],
-        "is_current": row["id"] == current_version_id,
-        "content_preview": _build_preview(row["content"] or ""),
-    }
 
 
 def ensure_document(session_id: str, doc_type: str, conn=None) -> Dict[str, Any]:
@@ -117,88 +78,6 @@ def ensure_document(session_id: str, doc_type: str, conn=None) -> Dict[str, Any]
             }
             repository.insert_document(doc)
         return doc
-
-
-def get_document(session_id: str, doc_type: str) -> Optional[Dict[str, Any]]:
-    return repository.get_document(session_id, _validate_doc_type(doc_type))
-
-
-def get_current_version(session_id: str, doc_type: str) -> Optional[Dict[str, Any]]:
-    with transaction():
-        doc = get_document(session_id, doc_type)
-        if not doc or not doc["current_version_id"]:
-            return None
-        row = repository.get_version(doc["id"], doc["current_version_id"])
-        return _row_to_version(row, doc["current_version_id"]) if row else None
-
-
-def get_documents_by_session(session_id: str) -> List[Dict[str, Any]]:
-    with transaction():
-        _require_session(session_id)
-        items = []
-        for doc_type in VALID_DOC_TYPES:
-            doc = get_document(session_id, doc_type)
-            current = get_current_version(session_id, doc_type) if doc else None
-            items.append(
-                {
-                    "doc_type": doc_type,
-                    "document_id": doc["id"] if doc else None,
-                    "current_version_id": doc["current_version_id"] if doc else None,
-                    "current_version_no": current["version_no"] if current else None,
-                    "updated_at": doc["updated_at"] if doc else None,
-                }
-            )
-        return items
-
-
-def list_versions(session_id: str, doc_type: str) -> Dict[str, Any]:
-    doc_type = _validate_doc_type(doc_type)
-    with transaction():
-        _require_session(session_id)
-        doc = get_document(session_id, doc_type)
-        current_id = doc["current_version_id"] if doc else None
-        rows = repository.list_versions(doc["id"]) if doc else []
-        return {
-            "doc_type": doc_type,
-            "document_id": doc["id"] if doc else None,
-            "current_version_id": current_id,
-            "versions": [
-                {
-                    "id": row["id"],
-                    "version_no": row["version_no"],
-                    "source_kind": row["source_kind"],
-                    "created_at": row["created_at"],
-                    "content_preview": _build_preview(row["content"]),
-                    "is_current": row["id"] == current_id,
-                    **_version_list_metadata(_parse_metadata(row["metadata_json"])),
-                }
-                for row in rows
-            ],
-        }
-
-
-def get_version(session_id: str, doc_type: str, version_id: str) -> Dict[str, Any]:
-    doc_type = _validate_doc_type(doc_type)
-    with transaction():
-        session = _require_session(session_id)
-        doc = get_document(session_id, doc_type)
-        if doc is None:
-            raise VersionNotFoundError(version_id)
-        row = repository.get_version(doc["id"], version_id)
-        if row is None:
-            raise VersionNotFoundError(version_id)
-        if (
-            doc_type == "prd"
-            and row["version_no"] == 1
-            and not _parse_metadata(row["metadata_json"]).get("review")
-            and row["source_kind"]
-            not in (VersionSourceKind.CHECKPOINT.value, VersionSourceKind.RESTORE.value)
-        ):
-            backfill_prd_review_metadata(session_id, json.loads(session["session_data"]))
-            row = repository.get_version(doc["id"], version_id)
-            if row is None:
-                raise VersionNotFoundError(version_id)
-        return _row_to_version(row, doc["current_version_id"])
 
 
 def update_version_note(
@@ -233,11 +112,12 @@ def _append_version(
         "source_kind": source_kind.value,
         "source_job_id": source_job_id,
         "parent_version_id": doc["current_version_id"],
-        "metadata_json": json.dumps(metadata or {}, ensure_ascii=False),
+        "metadata_json": json.dumps(bind_metadata(content, metadata or {}), ensure_ascii=False),
         "created_at": now,
     }
     repository.insert_version(row)
     repository.set_current(doc["id"], row["id"], now)
+    _invalidate_prd_state(doc, content)
     return _row_to_version(row, row["id"])
 
 
@@ -273,7 +153,12 @@ def update_current_content(
         row = repository.get_version(doc["id"], doc["current_version_id"])
         if row is None:
             raise VersionNotFoundError(doc["current_version_id"])
-        merged = merge_metadata(_parse_metadata(row["metadata_json"]), metadata)
+        existing_metadata = _parse_metadata(row["metadata_json"])
+        if row["content"] != content:
+            existing_metadata.pop("review", None)
+            existing_metadata.pop("quality_gate", None)
+        existing_metadata["content_hash"] = content_hash(content)
+        merged = bind_metadata(content, merge_metadata(existing_metadata, metadata))
         # A successful retry promotes its initial failed draft without keeping the failure marker.
         if (
             source_job_id
@@ -289,6 +174,7 @@ def update_current_content(
             json.dumps(merged, ensure_ascii=False),
         )
         repository.set_current(doc["id"], row["id"], _now_iso())
+        _invalidate_prd_state(doc, content)
         updated = repository.get_version(doc["id"], row["id"])
         if updated is None:
             raise VersionNotFoundError(row["id"])
@@ -312,9 +198,16 @@ def append_generated_version(
 
 
 def _sync_mirror(session_id: str, doc_type: str, content: str) -> None:
-    from apps.services.session_service import sync_session_mirror_for_doc_type
+    from apps.services.sessions.state import sync_session_mirror_for_doc_type
 
     sync_session_mirror_for_doc_type(session_id, doc_type, content)
+
+
+def _invalidate_prd_state(doc: dict, content: str) -> None:
+    if doc["doc_type"] == "prd":
+        from apps.services.sessions.state import invalidate_prd_state_for_content
+
+        invalidate_prd_state_for_content(doc["session_id"], content)
 
 
 def checkpoint(
@@ -327,7 +220,7 @@ def checkpoint(
         if not snapshot.strip():
             raise CheckpointError("无内容可保存")
         metadata = dict(current["metadata"]) if current else {}
-        metadata.pop("review", None)
+        metadata = bind_metadata(snapshot, metadata)
         if change_note:
             metadata["change_note"] = change_note
         version = _append_version(doc, snapshot, VersionSourceKind.CHECKPOINT, metadata=metadata)
@@ -347,8 +240,8 @@ def restore_version(session_id: str, doc_type: str, version_id: str) -> Dict[str
         source = get_version(session_id, doc_type, version_id)
         if source["is_current"]:
             raise RestoreError("该记录已是当前工作稿")
-        content = source["content"].strip()
-        if not content:
+        content = source["content"]
+        if not content.strip():
             raise RestoreError("该记录无内容可恢复")
         metadata = {
             "restored_from_version_id": source["id"],
@@ -356,6 +249,8 @@ def restore_version(session_id: str, doc_type: str, version_id: str) -> Dict[str
         }
         if source["metadata"].get("run_summary"):
             metadata["run_summary"] = source["metadata"]["run_summary"]
+        if source["metadata"].get("derived_from"):
+            metadata["derived_from"] = dict(source["metadata"]["derived_from"])
         version = _append_version(doc, content, VersionSourceKind.RESTORE, metadata=metadata)
         _sync_mirror(session_id, doc_type, content)
         return {
@@ -479,7 +374,9 @@ def patch_current_metadata(session_id: str, doc_type: str, metadata: Dict[str, A
     with transaction():
         current = get_current_version(session_id, doc_type)
         if current:
-            merged = merge_metadata(current["metadata"], metadata)
+            merged = bind_metadata(
+                current["content"], merge_metadata(current["metadata"], metadata)
+            )
             repository.update_metadata(current["id"], json.dumps(merged, ensure_ascii=False))
 
 
@@ -507,9 +404,12 @@ def backfill_prd_review_metadata(
         ):
             return
         existing = _parse_metadata(row["metadata_json"])
-        if existing.get("review"):
+        if existing.get("review") or existing.get("content_hash"):
             return
-        merged = merge_metadata(existing, {"review": review})
+        # Legacy review belongs to the mirrored content, never a later edited version.
+        if row["content"] != session_data.get("prdContent"):
+            return
+        merged = bind_metadata(row["content"], merge_metadata(existing, {"review": review}))
         repository.update_metadata(row["id"], json.dumps(merged, ensure_ascii=False))
 
 
@@ -579,10 +479,3 @@ def refresh_session_content_from_documents(
             session_data[field] = current["content"]
             changed = True
     return changed
-
-
-def get_current_content_for_doc_type(session_id: str, doc_type: str) -> Optional[str]:
-    current = get_current_version(session_id, doc_type)
-    if not current:
-        return None
-    return current.get("content")

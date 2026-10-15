@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 from apps.core.errors import DomainError
+from apps.domain.documents.content_identity import content_hash
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from apps.services.delivery_guards import assert_can_create_job  # noqa: E402
+from apps.services.generation.guards import assert_can_create_job  # noqa: E402
 
 
 def _minimal_summary(**overrides):
@@ -61,7 +62,16 @@ def test_downstream_documents_require_nonempty_baseline_content(artifact):
 
 @pytest.mark.parametrize("artifact", ["api-docs", "prompts"])
 def test_downstream_documents_accept_confirmed_baseline(artifact):
-    assert_can_create_job({"prdBaselineConfirmed": True, "prdContent": "# PRD"}, artifact)
+    assert_can_create_job(
+        {
+            "prdBaselineConfirmed": True,
+            "prdContent": "# PRD",
+            "prdBaselineVersionId": "confirmed",
+            "prdBaselineVersionNo": 1,
+            "prdBaselineContentHash": content_hash("# PRD")[:16],
+        },
+        artifact,
+    )
 
 
 @pytest.mark.parametrize("artifact", ["optimize-prd", "optimize-api-docs", "optimize-prompts"])

@@ -9,7 +9,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from apps.services.http_headers import build_attachment_content_disposition  # noqa: E402
+from apps.api.http_headers import build_attachment_content_disposition  # noqa: E402
 
 
 def test_ascii_filename_uses_simple_disposition():

@@ -24,6 +24,11 @@ uv run uvicorn --app-dir src apps.main:app --host 127.0.0.1 --port 8001
 | `SQLITE_BUSY_TIMEOUT_MS` | 5000，SQLite 锁等待上限 |
 | `JOB_MAX_CONCURRENCY` | 2，单进程最大同时生成数 |
 | `JOB_SHUTDOWN_TIMEOUT` | 5 秒，等待执行器取消的上限 |
+| `JOB_RUN_TIMEOUT` | 1200 秒，单次尝试及即时 SSE 用例总时限 |
+| `LLM_CALL_TIMEOUT` / `LLM_STREAM_IDLE_TIMEOUT` | 180 / 120 秒，普通调用及流片段空闲时限 |
+| `JOB_MAX_QUEUED` | 100，等待队列容量；满时返回可重试 503 |
+| `JOB_HEALTH_FAILURE_SECONDS` | 30 秒，持续调度故障就绪降级阈值 |
+| `JOB_PROGRESS_FLUSH_INTERVAL` / `JOB_PROGRESS_FLUSH_BYTES` | 0.25 秒 / 4096 字节，进度合并阈值 |
 | `JOB_LEASE_SECONDS` | 30，每租约周期的三分之一续租 |
 | `JOB_MAX_ATTEMPTS` | 3，包含首次执行与中断恢复 |
 | `JOB_POLL_INTERVAL` | 0.1 秒，队列检查间隔 |
@@ -37,13 +42,13 @@ uv run uvicorn --app-dir src apps.main:app --host 127.0.0.1 --port 8001
 
 ## 模块边界
 
-`src/apps/api/` 定义资源路由和严格请求模型；`services/` 编排用例；`db/repositories/` 负责 SQL。业务异常在 API 边界转换为统一响应：
+`src/apps/api/` 定义资源路由和严格请求模型，`api/compat/` 保留隐藏的旧路径；`services/` 按 sessions、documents、generation、conversations 分组编排用例；`db/repositories/` 负责 SQL。`domain/` 保存输入、审查、内容身份及质量规则，`core/resources/` 加载 Prompt 与 Skill。AST 测试检查依赖方向。业务异常在 API 边界转换为统一响应：
 
 ```json
 {"code":"JOB_CONFLICT","message":"该文档已有进行中的任务","request_id":"req_...","retryable":false}
 ```
 
-`core/lifecycle.py` 持有每个应用的 Resources，包括配置、数据库、JobManager 和业务服务。依赖与请求上下文从 `app.state.resources` 获取资源，测试中的多个应用互相隔离。Agent 实现在 `agents/`；模型工厂、观测、能力和 token 预算在 `llm/`。
+`bootstrap/lifecycle.py` 装配每个应用的 Resources，包括配置、数据库、JobManager、共享模型调用容量和业务服务；启动前校验必需本地资源。依赖与请求上下文从 `app.state.resources` 获取资源，测试中的多个应用互相隔离。Agent 实现在 `agents/`，不反向依赖 services；模型工厂、观测、能力和 token 预算在 `llm/`。
 
 ## API
 
@@ -96,3 +101,5 @@ mypy --config-file pyproject.toml src/apps
 ```
 
 应用与运行时测试使用临时 SQLite 和确定性执行器，不调用付费模型服务。真实模型接入需要配置凭据后做人工生成验证。实施计划见 [后端优化计划](../docs/backend-optimization-plan.md)。
+
+本轮一致性与运行保障改造见 [实施记录](../docs/backend-hardening-plan.md)。超时、容量、健康状态、错误码及 SQLite 在线备份恢复步骤见 [运行手册](../docs/backend-operations.md)。GitHub Actions 自动运行锁文件、Ruff、格式、全部测试、AST 边界和编译检查；Mypy 继续使用现有独立工具环境验收。

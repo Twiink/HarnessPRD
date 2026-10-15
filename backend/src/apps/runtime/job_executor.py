@@ -6,12 +6,11 @@ from typing import Any, Awaitable, Callable, Protocol
 
 from apps.domain.jobs import JobOutcome
 from apps.llm.metrics import RunMetricsCollector, log_run_summary
-from apps.services.document_service import DocumentService
-from apps.services.document_version_service import (
-    get_current_version,
+from apps.services.generation.documents import DocumentService
+from apps.services.documents.versions import (
     seed_context_documents_from_payload,
 )
-from apps.services.skill_loader import load_skill_bundle, bundle_to_injected_meta
+from apps.core.resources.skill_loader import load_skill_bundle, bundle_to_injected_meta
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -81,24 +80,9 @@ class JobExecutor:
             run_summary = run.finish(revision_applied=done.get("revision_applied"))
             summary = run_summary.to_dict()
             metadata = {"run_summary": summary}
-            if artifact in ("api-docs", "prompts"):
-                current = await asyncio.to_thread(get_current_version, job["session_id"], "prd")
-                derived = (
-                    {"prd_version_id": current["id"], "prd_version_no": current["version_no"]}
-                    if current
-                    else {}
-                )
-                if artifact == "prompts":
-                    api = await asyncio.to_thread(
-                        get_current_version, job["session_id"], "api-docs"
-                    )
-                    if not payload.get("api_docs_content"):
-                        derived["api_docs_skipped"] = True
-                    elif api:
-                        derived.update(
-                            api_docs_version_id=api["id"], api_docs_version_no=api["version_no"]
-                        )
-                metadata["derived_from"] = derived
+            if artifact in ("api-docs", "prompts", "optimize-api-docs", "optimize-prompts"):
+                # Legacy jobs have no trustworthy version snapshot; never infer it at completion.
+                metadata["derived_from"] = dict(payload.get("_source_snapshot") or {})
             log_run_summary(run_summary)
             return JobOutcome(draft, review, {**done, "content": draft}, metadata)
         except BaseException:

@@ -10,6 +10,9 @@ _database: ContextVar["Database | None"] = ContextVar("database", default=None)
 _transaction: ContextVar[tuple["Database", sqlite3.Connection] | None] = ContextVar(
     "transaction", default=None
 )
+_snapshot: ContextVar[tuple["Database", sqlite3.Connection] | None] = ContextVar(
+    "database_snapshot", default=None
+)
 
 
 class Database:
@@ -62,12 +65,32 @@ class Database:
         if current and current[0] is self:
             yield current[1]
             return
+        snapshot = _snapshot.get()
+        if snapshot and snapshot[0] is self:
+            yield snapshot[1]
+            return
         conn = self.connect()
         try:
             conn.execute("PRAGMA query_only = ON")
             yield conn
         finally:
             conn.close()
+
+    @contextmanager
+    def snapshot(self) -> Iterator[sqlite3.Connection]:
+        """Read several records from one WAL snapshot without reserving the writer."""
+        current = _transaction.get() or _snapshot.get()
+        if current and current[0] is self:
+            yield current[1]
+            return
+        with self.read() as conn:
+            token = _snapshot.set((self, conn))
+            try:
+                conn.execute("BEGIN")
+                yield conn
+            finally:
+                conn.rollback()
+                _snapshot.reset(token)
 
     def is_ready(self) -> bool:
         from apps.db.migrations import LATEST_VERSION
@@ -103,3 +126,15 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
 
 transaction = get_connection
+
+
+@contextmanager
+def read_connection() -> Iterator[sqlite3.Connection]:
+    with get_database().read() as conn:
+        yield conn
+
+
+@contextmanager
+def read_snapshot() -> Iterator[sqlite3.Connection]:
+    with get_database().snapshot() as conn:
+        yield conn

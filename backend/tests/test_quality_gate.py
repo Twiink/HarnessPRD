@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from apps.services.quality_gate import run_quality_gate  # noqa: E402
+from apps.domain.documents.quality import run_quality_gate  # noqa: E402
 
 REPO_ROOT = BACKEND_DIR.parent
 SAMPLE_PRD = (

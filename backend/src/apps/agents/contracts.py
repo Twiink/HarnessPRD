@@ -2,18 +2,7 @@
 
 from typing import Literal, TypedDict
 
-
-class ReviewIssue(TypedDict):
-    severity: str
-    section: str
-    problem: str
-    suggestion: str
-
-
-class ReviewResult(TypedDict):
-    passed: bool
-    summary: str
-    issues: list[ReviewIssue]
+from apps.domain.reviews import ReviewIssue, ReviewResult
 
 
 class TextDeltaEvent(TypedDict):

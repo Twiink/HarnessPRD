@@ -11,8 +11,8 @@ from apps.db.repositories.jobs import JobRepository, submission_hash
 from apps.domain.jobs import JobOutcome
 from apps.runtime.events import EventBroker
 from apps.runtime.job_manager import JobManager
-from apps.services.session_service import save_session
-from apps.services.document_version_service import get_current_version
+from apps.services.sessions.state import save_session
+from apps.services.documents.versions import get_current_version
 
 
 def session():

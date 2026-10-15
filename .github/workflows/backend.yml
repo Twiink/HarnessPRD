@@ -1,0 +1,41 @@
+name: Backend checks
+
+on:
+  push:
+    paths: ["backend/**", "skills/**", "config/**", "scripts/sqlite-backup.py", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["backend/**", "skills/**", "config/**", "scripts/sqlite-backup.py", ".github/workflows/backend.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.10.8"
+      - name: Install locked environment
+        run: uv sync --project backend --locked --python "${{ matrix.python }}"
+      - name: Check lock and exported dependencies
+        run: |
+          uv lock --project backend --check
+          uv export --project backend --locked --no-dev --no-hashes --format requirements.txt --output-file backend/requirements.txt
+          git diff --exit-code -- backend/requirements.txt
+      - name: Lint and format
+        run: |
+          uv run --project backend --no-sync ruff check backend scripts/sqlite-backup.py
+          uv run --project backend --no-sync ruff format --check backend scripts/sqlite-backup.py
+      - name: Test and verify architecture
+        run: uv run --project backend --no-sync pytest -c backend/pyproject.toml backend/tests -q
+      - name: Compile source
+        run: uv run --project backend --no-sync python -m compileall -q backend/src scripts/sqlite-backup.py

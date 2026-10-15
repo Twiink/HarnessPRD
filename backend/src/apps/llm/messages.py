@@ -14,9 +14,14 @@ def message_text(content: Any) -> str:
         return content
     if isinstance(content, list):
         return "".join(
-            item if isinstance(item, str) else str(item.get("text", ""))
+            item if isinstance(item, str) else item["text"]
             for item in content
-            if isinstance(item, str) or isinstance(item, dict)
+            if isinstance(item, str)
+            or (
+                isinstance(item, dict)
+                and item.get("type") in (None, "text", "text_delta", "output_text")
+                and isinstance(item.get("text"), str)
+            )
         )
     return ""
 

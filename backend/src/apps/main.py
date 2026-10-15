@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from apps.api.errors import register_error_handlers
 from apps.api.router import router
 from apps.core.config import Settings
-from apps.core.lifecycle import application_lifespan
+from apps.bootstrap.lifecycle import application_lifespan
 from apps.middleware.request_id import RequestIdMiddleware
 from apps.runtime.job_executor import Executor
 
@@ -36,7 +36,7 @@ def create_app(settings: Settings | None = None, executor: Executor | None = Non
         if (
             resources
             and resources.ready
-            and resources.job_manager.running
+            and resources.job_manager.healthy
             and resources.database.is_ready()
         ):
             return {"status": "ready"}
@@ -59,6 +59,7 @@ def create_app(settings: Settings | None = None, executor: Executor | None = Non
             "ready": resources.ready,
             "active_tasks": resources.job_manager.active_count,
             "jobs": resources.job_manager.jobs.counts(),
+            "runtime": resources.job_manager.health,
         }
 
     return app

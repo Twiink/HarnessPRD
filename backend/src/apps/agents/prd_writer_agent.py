@@ -1,6 +1,6 @@
 """PRD Writer Agent - 负责起草与修订 PRD 文档"""
 
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -9,17 +9,20 @@ from apps.agents.contracts import ReviewResult, TextDeltaEvent
 from apps.llm.messages import ConversationInput, build_lc_messages, message_text
 from apps.llm.factory import get_tracked_llm
 from apps.llm.metrics import LlmStep
-from apps.services.prompts import get_prompt
+from apps.core.resources.prompts import get_prompt
 
 
 class PrdWriterAgent:
     """独立的 PRD writer agent，专注于文档写作。"""
 
+    def __init__(self, llm_factory: Callable[..., Any] | None = None):
+        self._llm_factory = llm_factory
+
     async def write_stream(
         self,
         conversation_messages: ConversationInput,
     ) -> AsyncGenerator[TextDeltaEvent, None]:
-        llm = get_tracked_llm(LlmStep.PRD_WRITER.value, temperature=0.3)
+        llm = (self._llm_factory or get_tracked_llm)(LlmStep.PRD_WRITER.value, temperature=0.3)
         lc_messages: list[BaseMessage] = [
             SystemMessage(content=get_prompt("PRD_WRITER_SYSTEM_PROMPT"))
         ]
@@ -37,7 +40,7 @@ class PrdWriterAgent:
         current_draft: str,
         review_result: ReviewResult,
     ) -> AsyncGenerator[TextDeltaEvent, None]:
-        llm = get_tracked_llm(LlmStep.PRD_REWRITE.value, temperature=0.2)
+        llm = (self._llm_factory or get_tracked_llm)(LlmStep.PRD_REWRITE.value, temperature=0.2)
         lc_messages: list[BaseMessage] = [
             SystemMessage(content=get_prompt("PRD_WRITER_SYSTEM_PROMPT"))
         ]

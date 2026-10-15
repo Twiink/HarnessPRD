@@ -2,6 +2,7 @@
 
 import json
 import logging
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -10,9 +11,17 @@ from pydantic import BaseModel, ConfigDict
 
 from apps.api.deps import get_resources
 from apps.api.documents import DocumentType
+from apps.core.config import get_settings
 from apps.core.errors import DomainError
 from apps.core.logging import redact
 from apps.core.request_context import get_request_id
+from apps.domain.inputs import (
+    ConversationMessage,
+    FormInput,
+    RequirementsInput,
+    input_dict,
+    message_dicts,
+)
 from apps.llm.metrics import RunMetricsCollector, log_run_summary
 from apps.llm.token_budget import BudgetExceededError, BudgetCheckResult
 
@@ -27,33 +36,33 @@ class ConversationRequest(BaseModel):
 
 class StartConversationRequest(ConversationRequest):
     initial_input: str | None = ""
-    form_data: dict[str, Any] | None = None
+    form_data: FormInput | None = None
     system_prompt_override: str | None = None
 
 
 class ContinueConversationRequest(ConversationRequest):
     conversation_id: str
-    messages: list[dict[str, Any]]
+    messages: list[ConversationMessage]
     user_input: str
 
 
 class ConversationMessagesRequest(ConversationRequest):
-    conversation_messages: list[dict[str, Any]]
+    conversation_messages: list[ConversationMessage]
 
 
 class GeneratePrdFromSummaryRequest(ConversationRequest):
-    requirements_summary: dict[str, Any]
-    conversation_messages: list[dict[str, Any]] | None = None
+    requirements_summary: RequirementsInput
+    conversation_messages: list[ConversationMessage] | None = None
 
 
 class SyncSummaryFromConversationRequest(ConversationRequest):
-    requirements_summary: dict[str, Any]
-    conversation_messages: list[dict[str, Any]]
+    requirements_summary: RequirementsInput
+    conversation_messages: list[ConversationMessage]
 
 
 class GenerateApiDocsRequest(ConversationRequest):
     prd_content: str
-    conversation_messages: list[dict[str, Any]]
+    conversation_messages: list[ConversationMessage]
 
 
 class GeneratePromptsRequest(ConversationRequest):
@@ -100,14 +109,28 @@ def _make_sse_generator(async_gen, run_type: str):
     async def generate():
         run = RunMetricsCollector.start(run_type=run_type)
         revision_applied = None
+        iterator = async_gen.__aiter__()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + get_settings().job_run_timeout
         try:
-            async for event in async_gen:
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                try:
+                    event = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+                except StopAsyncIteration:
+                    break
                 if event.get("type") == "done" and "revision_applied" in event:
                     revision_applied = event["revision_applied"]
                 if event.get("type") == "error":
                     # 上游错误可能包含凭据或用户输入，只输出稳定提示。
                     event = _error_event()
                 yield _sse_line(event)
+        except asyncio.TimeoutError:
+            yield _sse_line(
+                _error_event("生成超过执行时限，请重试", code="RUN_TIMEOUT", retryable=True)
+            )
         except BudgetExceededError as exc:
             run.set_budget(exc.check)
             yield _sse_line(_budget_exceeded_event(exc.check))
@@ -150,7 +173,9 @@ async def start_conversation_stream(
 ):
     return _stream(
         resources.conversation_service.start_conversation_stream(
-            body.initial_input or "", body.form_data, body.system_prompt_override
+            body.initial_input or "",
+            input_dict(body.form_data) if body.form_data is not None else None,
+            body.system_prompt_override,
         ),
         "chat_start",
     )
@@ -162,7 +187,7 @@ async def continue_conversation_stream(
 ):
     return _stream(
         resources.conversation_service.continue_conversation_stream(
-            body.conversation_id, body.messages, body.user_input
+            body.conversation_id, message_dicts(body.messages), body.user_input
         ),
         "chat_continue",
     )
@@ -171,7 +196,8 @@ async def continue_conversation_stream(
 @router.post("/generate-prd-stream")
 async def generate_prd_stream(body: ConversationMessagesRequest, resources=Depends(get_resources)):
     return _stream(
-        resources.document_service.generate_prd_stream(body.conversation_messages), "generate_prd"
+        resources.document_service.generate_prd_stream(message_dicts(body.conversation_messages)),
+        "generate_prd",
     )
 
 
@@ -181,7 +207,7 @@ async def generate_prd_from_summary_stream(
 ):
     return _stream(
         resources.document_service.generate_prd_from_summary_stream(
-            body.requirements_summary, body.conversation_messages or []
+            input_dict(body.requirements_summary), message_dicts(body.conversation_messages or [])
         ),
         "generate_prd_from_summary",
     )
@@ -194,7 +220,7 @@ async def sync_summary_from_conversation(
     run = RunMetricsCollector.start(run_type="summary_sync")
     try:
         result = await resources.document_service.sync_summary_from_conversation(
-            body.requirements_summary, body.conversation_messages
+            input_dict(body.requirements_summary), message_dicts(body.conversation_messages)
         )
     except BudgetExceededError as exc:
         run.set_budget(exc.check)
@@ -217,7 +243,7 @@ async def sync_summary_from_conversation(
 async def generate_api_docs_stream(body: GenerateApiDocsRequest, resources=Depends(get_resources)):
     return _stream(
         resources.document_service.generate_api_docs_stream(
-            body.prd_content, body.conversation_messages
+            body.prd_content, message_dicts(body.conversation_messages)
         ),
         "generate_api_docs",
     )

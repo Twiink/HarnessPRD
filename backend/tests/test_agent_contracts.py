@@ -156,8 +156,8 @@ def test_public_message_builder_preserves_role_mapping():
 
 def test_injected_resources_are_used_by_prompts_and_documents(tmp_path):
     from apps.core.config import Settings, settings_context
-    from apps.services.document_service import _load_prd_template
-    from apps.services.prompts import get_prompt
+    from apps.services.generation.prompt_builders import _load_prd_template
+    from apps.core.resources.prompts import get_prompt
 
     (tmp_path / "prompts").mkdir()
     (tmp_path / "prompts" / "SYSTEM_PROMPT.md").write_text("injected system prompt")
@@ -168,7 +168,7 @@ def test_injected_resources_are_used_by_prompts_and_documents(tmp_path):
 
 
 def test_prompt_templates_keep_literal_json_braces():
-    from apps.services.prompts import get_api_docs_review_prompt, get_prompts_review_prompt
+    from apps.core.resources.prompts import get_api_docs_review_prompt, get_prompts_review_prompt
 
     for build in (get_api_docs_review_prompt, get_prompts_review_prompt):
         text = build("prd context", "document context")

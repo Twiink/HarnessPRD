@@ -1,4 +1,4 @@
-from apps.services.review_result_utils import (
+from apps.domain.reviews import (
     build_parse_failed_review,
     normalize_document_review,
 )
